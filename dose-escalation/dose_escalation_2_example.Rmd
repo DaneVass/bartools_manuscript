@@ -282,59 +282,59 @@ bartools includes a range of visualisation options for examining barcode-seq dat
 
 ## Bubble plot
 ```{r}
-plotBarcodeBubble(dge$counts, proportion.cutoff = 10, labels = T)
+plotBarcodeBubble(dge$counts, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_all_collapsed.pdf")
 
-plotBarcodeBubble(ibet$counts, proportion.cutoff = 10, labels = T)
+plotBarcodeBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_ibet_collapsed.pdf")
 
-plotBarcodeBubble(arac$counts, proportion.cutoff = 10, labels = T)
+plotBarcodeBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_arac_collapsed.pdf")
 ```
 
 
 ## Ordered Bubble plots
 ```{r}
-plotOrderedBubble(dge$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, filter.cutoff = .01)
+plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed.pdf")
 
-plotOrderedBubble(dge$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = dge$samples, group = "Treatment", filter.cutoff = .01)
+plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Treatment", samples = dge$samples)
 ggsave("./plots/orderedBubble_collapsed_Treatment.pdf")
 
-plotOrderedBubble(dge$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = dge$samples, group = "Strategy", filter.cutoff = .01)
+plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Strategy", samples = dge$samples)
 ggsave("./plots/orderedBubble_collapsed_Strategy.pdf")
 
-plotOrderedBubble(dge$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = dge$samples, group = "Timepoint", filter.cutoff = .01)
+plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Timepoint", samples = dge$samples)
 ggsave("./plots/orderedBubble_collapsed_Timepoint.pdf")
 ```
 
 ### IBET only
 ```{r}
-plotOrderedBubble(ibet$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, filter.cutoff = .01)
+plotOrderedBubble(counts = ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet.pdf")
 
-plotOrderedBubble(ibet$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = ibet$samples, group = "Treatment", filter.cutoff = .01)
+plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Treatment", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Treatment.pdf")
 
-plotOrderedBubble(ibet$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = ibet$samples, group = "Strategy", filter.cutoff = .01)
+plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Strategy", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Strategy.pdf")
 
-plotOrderedBubble(ibet$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = ibet$samples, group = "Timepoint", filter.cutoff = .01)
+plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Timepoint", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Timepoint.pdf")
 ```
 
 ### AraC
 ```{r}
-plotOrderedBubble(arac$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, filter.cutoff = .01)
+plotOrderedBubble(counts = arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac.pdf")
 
-plotOrderedBubble(arac$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = arac$samples, group = "Treatment", filter.cutoff = .01)
+plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Treatment", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Treatment.pdf")
 
-plotOrderedBubble(arac$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = arac$samples, group = "Strategy", filter.cutoff = .01)
+plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Strategy", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Strategy.pdf")
 
-plotOrderedBubble(arac$counts, proportion.cutoff = 10, labels = T, orderSample = "TP0", filterLow = T, samples = arac$samples, group = "Timepoint", filter.cutoff = .01)
+plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Timepoint", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Timepoint.pdf")
 
 ```
