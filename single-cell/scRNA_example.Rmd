@@ -1,0 +1,817 @@
+---
+title: "bartools_single_cell_hashing_example"
+output: html_notebook
+self_contained: no
+---
+
+# bartools_single_cell_hashing_example
+
+MLL-AF9 cells were barcoded with the SPLINTR mCHERRY barcode library (ref). After expansion for 1 week the cell pool was divided in half and each was separately labelled with a different Mouse TotalSeq-A hashtag. Following this, pools were combined and 10X Genomics single-cell RNA-seq 3' v3 sample was performed.  
+
+A representative sample of the same cells were also harvested for population DNA barcoding (barcode-seq) at this timepoint with the idea that we can compare the total barcode frequency in the population to those recovered in the single cell data to get an idea of the barcode recovery before we do our main drug resistance experiment.
+
+Below is analysis of the single cell and population datasets. See also README in cluster folder 
+for more info on upstream processing steps.
+
+# Setup ----------------------
+
+## experiment folders
+```{r, message=FALSE, warning=FALSE}
+library(Seurat)
+library(bartools)
+library(tidyverse)
+
+setwd("../scRNA-seq_example/")
+
+results.dir <- file.path(getwd(), "results")
+dir.create(results.dir, showWarnings = F)
+
+plots.dir <- file.path(getwd(), "plots")
+dir.create(plots.dir, showWarnings = F)
+
+```
+
+## SPLINTR barcode parameters
+```{r}
+# OPTIONS
+
+threads <- 4 # number of threads to use for 10X cell barcode annotation
+
+# reference barcode library
+mCHERRY.ref <- "../../datasets/barcoded_single_cell/mCHERRY_barcode_reference_library.fasta"
+
+# define barcode regex patterns
+barcode.regex.up <- "CGATTGACTA([ACTG][ACTG][GC][AT][GC][ACTG][ACTG][AT][GC][AT]){2,6}"
+barcode.regex.down <- "([ACTG][ACTG][GC][AT][GC][ACTG][ACTG][AT][GC][AT]){2,6}TGCTAATGCG"
+
+upstream.constant <- "CGATTGACTA"
+downstream.constant <- "TGCTAATGCG"
+
+# Get the bam file
+bam <- "../../datasets/barcoded_single_cell/unmapped.bam"
+
+```
+
+## Import filtered scRNA expression matrix
+```{r}
+expression.data <- Read10X(data.dir = "../../datasets/barcoded_single_cell/GEX_filtered_feature_bc_matrix/", strip.suffix = T)
+sc <- CreateSeuratObject(counts = expression.data, 
+                         min.cells = 3, 
+                         min.features = 200, 
+                         project = "bartools_example")
+sc
+```
+
+## Import SPLINTR annotations from BARtab
+```{r}
+bc.annot <- read.delim("../../datasets/barcoded_single_cell/BARtab_out/counts/unmapped_cell-barcode-anno.tsv", sep = ' ')
+rownames(bc.annot) <- gsub('-1', '', rownames(bc.annot))
+sc <- AddMetaData(sc, bc.annot)
+sc@meta.data
+
+length(which(is.na(sc$barcode)))
+length(which(!is.na(sc$barcode)))
+```
+
+## Barcode annotation results
+```{r}
+message("Percentage of cells with no barcode detected")
+length(which(is.na(sc$barcode)))/ncol(sc) * 100
+
+message("Percentage of cells with a barcode detected")
+length(which(!is.na(sc$barcode)))/ncol(sc) * 100
+```
+
+## group barcode metadata into detected and not.detected
+```{r}
+det <- rep("detected", nrow(sc@meta.data))
+det[which(is.na(sc$barcode))] <- "not.detected"
+sc$detected <- det
+table(sc$detected)
+
+# simplify barcode labels
+sc$barcode <- gsub("mCHERRY_Barcode", "BC", sc$barcode)
+```
+
+## Add percent mito counts
+```{r}
+mito.genes <- grep(pattern = "^mt-", x = rownames(x = sc@assays$RNA), value = TRUE)
+percent.mito <- Matrix::colSums(sc@assays$RNA[mito.genes, ])/Matrix::colSums(sc@assays$RNA)*100
+sc <- AddMetaData(object = sc, metadata = percent.mito, col.name = "percent.mito")
+```
+
+## plot basic scRNA-seq metrics - pre-filter
+```{r}
+VlnPlot(object = sc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "orig.ident")
+ggsave("./plots/QC_metrics_pre_filter_orig_ident.pdf")
+
+VlnPlot(object = sc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "detected", cols = c("blue", "lightblue"))
+ggsave("./plots/QC_metrics_pre_filter_detected.pdf")
+
+#VlnPlot(object = sc, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "detected", cols = c("firebrick", "red2"), split.by = "HTO_maxID")
+#ggsave("./plots/QC_metrics_pre_filter_detected_HTO.pdf")
+
+
+```
+
+# Hashtag demultiplex ----------------------
+Technical replicate 1 - Hashtag #1
+Technical replicate 2 - Hashtag #2
+
+## Get results of CITE-seq count
+```{r}
+hto.dat <- "../../datasets/barcoded_single_cell/HTO_umi_count/"
+hto <- Read10X(hto.dat, gene.column=1)
+dim(hto)
+head(hto)
+```
+
+## remove information on unmapped HTO reads
+```{r}
+hto <- hto[-3,] # remove unmapped
+rownames(hto) <- c("MA9-1", "MA9-2")
+
+# subset cell barcodes that are detected in both the RNA and HTO
+joint.bcs <- intersect(colnames(hto), colnames(sc))
+length(joint.bcs)
+length(colnames(sc))
+length(colnames(hto))
+
+# subset data on shared cell IDs
+sc <- sc[, joint.bcs]
+hto <- hto[, joint.bcs]
+```
+
+### Add HTO data as a new assay independent from RNA
+```{r}
+sc[["HTO"]] <- CreateAssayObject(counts = hto)
+
+# Normalize HTO data, here we use centered log-ratio (CLR) transformation
+sc <- NormalizeData(sc, assay = "HTO", normalization.method = "CLR", verbose = T)
+# demultiplex hashtags
+sc <- HTODemux(sc, assay = "HTO", positive.quantile = 0.99, seed = 10101, verbose = T)
+# calculate doublet percentage
+sc.doublet.prop <- 100*(table(sc$HTO_classification.global)[1][[1]]/length(joint.bcs))
+sc.doublet.prop
+
+```
+
+## Group cells based on the max HTO signal
+```{r}
+Idents(sc) <- "HTO_maxID"
+p <- RidgePlot(sc, assay = "HTO", features = rownames(sc[["HTO"]])[1:2], ncol = 2)
+ggsave(file.path(plots.dir,"MA9_HTO_ridgeplot.pdf"))
+p
+```
+
+## raw counts scatterplots
+```{r raw counts scatterplots}
+hash.data <- as.data.frame(t(as.matrix(hto)))
+hto.classification <- as.data.frame(sc@meta.data[,c("HTO_classification.global","HTO_classification"), drop = F])
+hash.data <- merge(hash.data, hto.classification, by="row.names",all.x=TRUE)
+rownames(hash.data) <- hash.data$Row.names
+hash.data$Row.names <- NULL
+head(hash.data)
+
+pdf(file.path(plots.dir, "MA9_HTO_scatter_raw_counts.pdf"), width = 8)
+# all combinations - global only
+p <- ggplot(data = hash.data, aes(x = `MA9-1`, y = `MA9-2`, color = HTO_classification.global)) +
+    geom_point(size = 0.5) + 
+    theme_bw() +
+    ggtitle("MA9-1 vs MA9-2 - HTO raw counts", subtitle = paste("% doublets =", round(sc.doublet.prop, 1)))
+p
+dev.off()
+p
+```
+
+## normalised counts scatterplots
+```{r normalised counts scatterplots}
+DefaultAssay(sc) <- "HTO"
+hash.data <- as.data.frame(t(sc@assays$HTO@data))
+hto.classification <- as.data.frame(sc@meta.data[,c("HTO_classification.global","HTO_classification"), drop = F])
+hash.data <- merge(hash.data, hto.classification, by="row.names",all.x=TRUE)
+rownames(hash.data) <- hash.data$Row.names
+hash.data$Row.names <- NULL
+head(hash.data)
+
+pdf(file.path(plots.dir, "MA9_HTO_scatter_normalised_counts.pdf"), width = 8)
+# all combinations - global only
+p <- ggplot(data = hash.data, aes(x = `MA9-1`, y = `MA9-2`, color = HTO_classification.global)) +
+    geom_point(size = 0.5) + 
+    theme_bw() +
+    ggtitle("MA9-1 vs MA9-2 - HTO raw counts", subtitle = paste("% doublets =", round(sc.doublet.prop, 1)))
+p
+dev.off()
+p
+
+```
+
+## Heatmaps
+```{r Heatmap}
+p <- HTOHeatmap(sc, assay = "HTO", ncells = 500) + ggtitle("MA9 HTO heatmap")
+ggsave(file.path(plots.dir, "MA9_HTO_heatmap.pdf"))
+p
+```
+### plot barcodes per cell
+```{r}
+bartools::plotCellsPerGroup(sc.obj = sc, group = "barcode", order = F, threshold = 100)
+```
+
+### find doublets by lineage barcode abundance - still testing this
+```{r}
+findDoubletsByBarcode <- function(obj, sep = ","){
+  doublets.by.barcode <- c()
+
+  # assert barcodes are present in object
+  if(is.null(obj$barcode)){
+    message("no barcode field identified in object metadata. Stopping")
+    break()
+  }
+
+  # identify cells that have more than 1 barcode
+  multbarcodes <- obj$barcode[grep(sep,obj$barcode)]
+  sortbc <- c()
+  for (i in 1:length(multbarcodes)){
+    barcodes <- stringr::str_split(multbarcodes[i], pattern = sep)
+    barcodes <- lapply(barcodes,sort)
+    barcodes <- paste(unlist(barcodes),collapse = sep)
+    names(barcodes) <- names(multbarcodes[i])
+    sortbc <- c(sortbc,barcodes)
+
+  }
+
+  # Find combinations of barcodes that appear only once
+  sortbc <- as.data.frame(sortbc)
+  doubletbc <- sortbc[which(!(duplicated(sortbc) | duplicated(sortbc, fromLast=TRUE))),,drop=F]
+
+  #insert metadata into seurat obj
+  obj$doubletBarcode <- ifelse(rownames(obj@meta.data) %in% rownames(doubletbc), 
+                               yes = "doublet", no = "singlet")
+  unknown <- which(obj$barcode == "not.detected" | is.na(obj$barcode))
+  obj$doubletBarcode[unknown] <- "unknown"
+
+  return(obj)
+}
+```
+
+
+```{r}
+sc <- findDoubletsByBarcode(sc, sep = ",")
+table(sc$doubletBarcode)
+```
+
+## plot violin for hashtag data - pre filtering
+```{r}
+Idents(sc) <- "HTO_classification.global"
+VlnPlot(sc, features = "nCount_RNA", pt.size = 0, log = F, split.by = "detected")
+ggsave(file.path(plots.dir, "Barcode_HTO_violin_detected.pdf"))
+VlnPlot(sc, features = "nCount_RNA", pt.size = 0, log = F, split.by = "doubletBarcode")
+ggsave(file.path(plots.dir, "Barcode_HTO_violin_doubletBC.pdf"))
+```
+
+```{r}
+library(tidyverse)
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global) %>% group_by(doubletBarcode, HTO_classification.global) %>% tally() %>% ggplot() + geom_histogram(aes(x = HTO_classification.global, y = n, fill = doubletBarcode), stat = "identity") + 
+  theme_bw() + 
+  ylab("Number of cells")
+  
+
+```
+
+### merge hash raw and normalised counts into metadata
+```{r}
+hto.raw.dat <- as.data.frame(t(as.matrix(hto)))
+colnames(hto.raw.dat) <- c("MA9_1_HTO_raw", "MA9_2_HTO_raw")
+hto.norm.dat <- as.data.frame(t(sc@assays$HTO@data))
+colnames(hto.norm.dat) <- c("MA9_1_HTO_norm", "MA9_2_HTO_norm")
+
+sc <- AddMetaData(sc, hto.raw.dat)
+sc <- AddMetaData(sc, hto.norm.dat)
+```
+
+### ggtheme_dv
+```{r}
+# a modification to theme_bw() with custom fill color scale
+ggtheme_dv <- function(base_size = 11, base_family = "", base_line_size = base_size/22, 
+    base_rect_size = base_size/22) 
+{
+    theme_grey(base_size = base_size, base_family = base_family, 
+        base_line_size = base_line_size, base_rect_size = base_rect_size) %+replace% 
+        theme(panel.background = element_rect(fill = "white", colour = NA), 
+            panel.border = element_rect(fill = NA, colour = "black"), 
+            #axis.line = element_line(size = base_line_size, colour = "black", linetype=1),
+            #panel.grid.major.x = element_line(colour = "grey92"),
+            panel.grid.major.y = element_line(colour = "grey92"),
+            axis.text = element_text(size = 11, colour = "black"),
+            axis.ticks.length=unit(5, "pt"),
+            legend.position = "bottom",
+            strip.background = element_rect(fill = "grey85", 
+                colour = "grey20"), legend.key = element_rect(fill = "white", 
+                colour = NA), complete = TRUE)
+    
+}
+
+```
+
+
+## plots 
+```{r}
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nCount_RNA) %>% filter(doubletBarcode == "doublet") %>% group_by(HTO_classification.global) %>% tally()
+
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nCount_RNA) %>% filter(HTO_classification.global == "Singlet") %>% ggplot(aes(doubletBarcode, nCount_RNA, fill = doubletBarcode)) +
+  geom_violin() + geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) + ggtitle("Hashtag singlets")
+
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nCount_RNA) %>% filter(HTO_classification.global == "Doublet") %>% ggplot(aes(doubletBarcode, nCount_RNA, fill = doubletBarcode)) +
+  geom_violin() + geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) + ggtitle("Hashtag doublets")
+
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nFeature_RNA) %>% filter(HTO_classification.global == "Singlet") %>% ggplot(aes(doubletBarcode, nFeature_RNA, fill = doubletBarcode)) +
+  geom_violin() + geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) + ggtitle("Hashtag singlets")
+
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nCount_RNA) %>% filter(doubletBarcode == "singlet") %>% ggplot(aes(HTO_classification.global, nCount_RNA, fill = HTO_classification.global)) +
+  geom_violin() + geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) + ggtitle("Barcode singlets") + ggtheme_dv()
+
+sc@meta.data %>% dplyr::select(doubletBarcode, HTO_classification.global, MA9_1_HTO_norm, MA9_2_HTO_norm, nCount_RNA) %>% filter(doubletBarcode == "doublet") %>% ggplot(aes(HTO_classification.global, nCount_RNA, fill = HTO_classification.global)) +
+  geom_violin() + geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) + ggtitle("Barcode doublets") + ggtheme_dv() + scale_fill_manual(values =  ggpubr::get_palette("aaas", k = 10))
+
+```
+
+## Venn diagrams
+```{r}
+library(VennDetail)
+
+SPLINTR.NA <- rownames(sc@meta.data[which(is.na(sc$barcode)),])
+SPLINTR.detected <- rownames(sc@meta.data[which(!is.na(sc$barcode)),])
+
+SPLINTR.unknown <- rownames(sc@meta.data[which(sc$doubletBarcode == "unknown"),])
+SPLINTR.singlet <- rownames(sc@meta.data[which(sc$doubletBarcode == "singlet"),])
+SPLINTR.doublet <- rownames(sc@meta.data[which(sc$doubletBarcode == "doublet"),])
+
+HTO.unknown <- rownames(sc@meta.data[which(sc$HTO_classification.global == "Negative"),])
+HTO.singlet <- rownames(sc@meta.data[which(sc$HTO_classification.global == "Singlet"),])
+HTO.doublet <- rownames(sc@meta.data[which(sc$HTO_classification.global == "Doublet"),])
+
+res <- venndetail(list("SPLINTR.doublet" = SPLINTR.doublet,
+                       "SPLINTR.unknown" = SPLINTR.unknown,
+                       "HTO.doublet" = HTO.doublet,
+                       "HTO.unknown" = HTO.unknown))
+vennpie(res)
+plot(res)
+
+```
+
+#----- cell cycle genesets ------
+```{r}
+s.genes <- c("Mcm5","Pcna","Tyms","Fen1","Mcm2","Mcm4","Rrm1","Ung","Gins2","Mcm6","Cdca7","Dtl","Prim1","Uhrf1","Mlf1ip","Hells","Rfc2","Rpa2","Nasp","Rad51ap1","Gmnn","Wdr76","Slbp","Ccne2","Ubr7","Pold3","Msh2","Atad2","Rad51","Rrm2","Cdc45","Cdc6","Exo1","Tipin","Dscc1","Blm","Casp8ap2","Usp1","Clspn","Pola1","Chaf1b","Brip1","E2f8")
+g2m.genes <- c("Hmgb2","Cdk1","Nusap1","Ube2c","Birc5","Tpx2","Top2a","Ndc80","Cks2","Nuf2","Cks1b","Mki67","Tmpo","Cenpf","Tacc3","Fam64a","Smc4","Ccnb2","Ckap2l","Ckap2","AurkB","Bub1","Kif11","Anp32e","Tubb4b","Gtse1","Kif20b","Hjurp","Cdca3","Hn1","Cdc20","Ttk","Cdc25c","Kif2c","Rangap1","Ncapd2","Dlgap5","Cdca2","Cdca8","Ect2","Kif23","Hmmr","Aurka","Psrc1","Anln","Lbr","Ckap5","Cenpe","Ctcf","Nek2","G2e3","Gas2l3","Cbx5","Cenpa")
+
+```
+
+# cell cycle analysis
+```{r}
+DefaultAssay(sc) <- "RNA"
+cell.cycle.genes <- list(s.genes = s.genes, g2m.genes = g2m.genes)
+sc <- CellCycleScoring(sc, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+# Visualize the distribution of cell cycle markers across
+RidgePlot(sc, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+ggsave("./plots/ridgeplot_cell_cycle_labelled.pdf")
+```
+
+## save unfiltered object
+```{r}
+saveRDS(sc, file = "./results/sc_raw_seurat.rds")
+```
+
+## filter scRNAseq object
+```{r}
+Idents(sc) <- "HTO_classification.global"
+# Remove negative HTO cells from the object
+sc.filter <- subset(sc, idents = "Negative", invert = TRUE)
+
+# Remove doublet HTO cells from the object
+sc.filter <- subset(sc.filter, idents = "Doublet", invert = TRUE)
+
+# Remove SPLINTR doubletBarcode cells from the object
+Idents(sc.filter) <- "doubletBarcode"
+sc.filter <- subset(sc.filter, idents = "doublet", invert = TRUE)
+
+sc.filter
+```
+
+## filter single cell data on QC metrics
+```{r}
+sc.filter <- subset(sc.filter, subset = nFeature_RNA > 500 & nFeature_RNA < 6000 & percent.mito < 10)
+```
+
+## plot basic scRNA-seq metrics - post-filter
+```{r}
+VlnPlot(object = sc.filter, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "orig.ident")
+ggsave("./plots/QC_metrics_post_filter_orig_ident.pdf")
+
+VlnPlot(object = sc.filter, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "detected", cols = c("blue", "lightblue"))
+ggsave("./plots/QC_metrics_post_filter_detected.pdf")
+
+VlnPlot(object = sc.filter, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, pt.size = 0, log = F, group.by = "detected", cols = c("firebrick", "red2"), split.by = "HTO_maxID")
+ggsave("./plots/QC_metrics_post_filter_detected_HTO.pdf")
+
+```
+
+## correlate RNA and feature detection and color by barcode detected
+```{r}
+library(ggpointdensity)
+library(viridis)
+
+dat <- sc.filter@meta.data %>% dplyr::select(nCount_RNA, nFeature_RNA, percent.mito, detected, doubletBarcode, bc.umi.count)
+dat$detected <- as.factor(dat$detected)
+dat$doubletBarcode <- as.factor(dat$doubletBarcode)
+dat$nCount_RNA <- as.integer(dat$nCount_RNA)
+dat$bc.umi.count <- as.integer(dat$bc.umi.count)
+dat$bc.umi.count[which(is.na(dat$bc.umi.count))] <- 0
+
+
+ggplot(dat, aes(x = nCount_RNA, y = nFeature_RNA)) + 
+  geom_pointdensity(size = 0.5, adjust = 50) + 
+  scale_color_viridis() + facet_wrap(~ detected) +
+  theme_bw()
+
+ggsave("./plots/Count_Feature_detected_scatterdensity.pdf", width = 6, height = 4)
+
+ggplot(dat, aes(x = nCount_RNA, y = nFeature_RNA, color = bc.umi.count)) + 
+  geom_point(size = 0.5) + 
+  scale_color_continuous(magma(30)) +
+  theme_bw()
+
+ggsave("./plots/Count_Feature_detected_scatterdensity.pdf", width = 6, height = 4)
+
+
+```
+
+
+## proportion of barcoded true cells
+```{r}
+message("Percentage of cells with no barcode detected")
+length(which(is.na(sc.filter$barcode)))/ncol(sc.filter) * 100
+
+message("Percentage of cells with a barcode detected")
+length(which(!is.na(sc.filter$barcode)))/ncol(sc.filter) * 100
+
+pdf("./plots/barcode_pie.pdf")
+pie(c(77,23), labels = c("barcode", "no barcode"), col = c("blue", "lightblue"), init.angle = 90)
+dev.off()
+```
+## normalise single cell data
+```{r}
+DefaultAssay(sc.filter) <- "RNA"
+sc.filter <- NormalizeData(sc.filter, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# Select the top 1000 most variable features
+sc.filter <- FindVariableFeatures(sc.filter, selection.method = "vst", nfeatures = 1000)
+top50 <- head(VariableFeatures(sc.filter), 50)
+plot1 <- VariableFeaturePlot(sc.filter)
+plot2 <- LabelPoints(plot = plot1, points = top50, repel = TRUE)
+plot1
+plot2 + scale_y_continuous(trans = "log1p")
+```
+
+
+```{r}
+# Scaling RNA data, we only scale the variable features here for efficiency
+sc.filter <- ScaleData(sc.filter, features = rownames(sc.filter), vars.to.regress = c("S.Score", "G2M.Score"))
+
+# Run PCA
+sc.filter <- RunPCA(sc.filter, features = VariableFeatures(sc.filter))
+ElbowPlot(sc.filter, ndims = 50)
+
+sc.filter <- FindNeighbors(sc.filter, reduction = "pca", dims = 1:50)
+sc.filter <- FindClusters(sc.filter, resolution = 0.5, verbose = FALSE)
+sc.filter <- RunUMAP(sc.filter, verbose = T, dims = 1:50, n.neighbors = 20)
+```
+
+## save filtered object
+```{r}
+saveRDS(sc.filter, file = "./results/sc_filtered_normalised_seurat.rds")
+```
+
+## save filtered object in SCE format
+```{r}
+# setup data in SingleCellExperiment object format
+sc.filter.sce <- as.SingleCellExperiment(sc.filter)
+saveRDS(sc.filter.sce, file = "./results/sc_filtered_normalised_sce.rds")
+```
+
+## read in filtered scRNA-seq object
+```{r}
+sc.filter <- readRDS(file = "../scRNA-seq_example/results/sc_filtered_normalised_seurat.rds")
+sc.filter.sce <- readRDS(file = "../scRNA-seq_example/results/sc_filtered_normalised_sce.rds")
+
+sc.filter$barcode <- gsub("mCHERRY_Barcode", "BC", sc.filter$barcode)
+sc.filter.sce$barcode <- gsub("mCHERRY_Barcode", "BC", sc.filter.sce$barcode)
+```
+
+## Dimensionality reduction plots
+```{r}
+DimPlot(sc.filter, reduction = "pca", label = T)
+DimPlot(sc.filter, reduction = "umap", label = T, label.size = 6) + NoLegend()
+ggsave("./plots/UMAP_louvain_clusters_labelled.pdf", width = 6, height = 6)
+
+cells.to.plot <- rownames(sc.filter@meta.data[which(!is.na(sc.filter$barcode)),])
+
+DimPlot(sc.filter, reduction = "umap", label = T, cells.highlight = cells.to.plot, sizes.highlight = 0.5, pt.size = 0.5, label.size = 6, shuffle = T)+ NoLegend()
+ggsave("./plots/UMAP_barcoded_cells_labelled.pdf", width = 6, height = 6)
+```
+
+## plot distribution of cells per clone - ordered
+```{r}
+plotCellsPerGroup(sc.filter.sce, group = "barcode", order = T, threshold = 100, plot = T, label = T)
+ggsave("./plots/cells_per_barcode_ordered.pdf")
+```
+## plot distribution of cells per clone - unordered
+```{r}
+plotCellsPerGroup(sc.filter, group = "barcode", order = F, threshold = 100, plot = T, label = T)
+ggsave("./plots/cells_per_barcode_unordered.pdf")
+```
+
+
+## plot feature per clone
+```{r}
+p1 <- plotMetrics(sc.obj = sc.filter, group = "barcode", 
+                    factor = "nCount_RNA", threshold = 100,
+                    trans = "log10")
+p2 <- plotMetrics(sc.obj = sc.filter.sce, group = "barcode", 
+                    factor = "nFeature_RNA", threshold = 100, trans = "log10") + theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.title.y=element_blank()
+        )
+
+p1 + p2
+ggsave("./plots/RNA_features_per_clone.pdf", width = 7, height = 4)
+```
+
+## phyper clone enrichment in clusters
+## calculate clusters enriched for different clones  - hypergeometric tests
+```{r}
+
+plotClusterEnrichment(sc.obj = sc.filter, 
+                    group = "barcode", 
+                    factor = "BC_1614", 
+                    idents = "seurat_clusters", 
+                    threshold = 0.01,
+                    order = T,
+                    plot = T)
+ggsave("./plots/cluster_enrichment_BC_1614.pdf", width = 5, height = 5)
+
+cells.to.highlight <- rownames(sc.filter@meta.data %>% filter(barcode == "BC_1614"))
+p1 <- DimPlot(sc.filter, label = T, label.size = 6) + NoLegend() + ggtitle("Louvain clusters")
+p2 <- DimPlot(sc.filter, cells.highlight = cells.to.highlight, label = T, label.size = 6) + NoLegend() + ggtitle("BC_1614")
+p2
+ggsave("./plots/cells_highlight_dimplot_BC_1614.pdf", width = 5, height = 5)
+```
+
+## calculate percent detected in each cluster
+```{r}
+# Select metadata
+data <- sc.filter@meta.data %>% dplyr::select(seurat_clusters, detected, nCount_RNA)
+
+# count of detected and undetected per 100 cells per cluster
+group_counts <- data %>%
+  group_by(seurat_clusters, detected) %>%
+  summarise(count = n()/100) %>%
+  ungroup()
+
+# Calculate the total count of each level of detected within each cluster
+group_totals <- group_counts %>%
+  group_by(seurat_clusters) %>%
+  summarise(total_count = sum(count))
+
+# Calculate the percentage of each level of detected within each cluster
+result <- group_counts %>%
+  inner_join(group_totals, by = "seurat_clusters") %>%
+  mutate(percent = (count / total_count) * 100) %>%
+  select(seurat_clusters, detected, percent)
+
+# plot data
+ggplot(result, aes(y = seurat_clusters, x = percent, fill = detected)) + 
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("royalblue2", "lightblue")) +
+  theme_bw() +
+  ggtitle("% lineage barcode detection per 100 cells per cluster")
+ggsave("./plots/lineage-barcode-detection-per-cluster.pdf", width = 6, height = 5)
+
+
+# plot median count data per cluster
+result2 <- data %>% group_by(seurat_clusters) %>% summarise(median(nCount_RNA))
+ggplot(result2, aes(y = seurat_clusters, x = `median(nCount_RNA)`, fill = `median(nCount_RNA)`)) + 
+  geom_bar(stat = "identity") + 
+  scale_fill_viridis() + 
+  theme_bw() +
+  ggtitle("median UMIs per cluster")
+ggsave("./plots/median-UMI-per-cluster.pdf", width = 6, height = 5)
+
+```
+
+
+
+
+```{r}
+plotClusterEnrichment(sc.obj = sc.filter, 
+                                  group = "barcode", 
+                                  factor = "BC_1755", 
+                                  idents = "seurat_clusters", 
+                                  threshold = 0.01,
+                                  order = T,
+                                  plot = T)
+ggsave("./plots/cluster_enrichment_BC_1755.pdf", width = 5, height = 5)
+
+cells.to.highlight <- rownames(sc.filter@meta.data %>% filter(barcode == "BC_1755"))
+p1 <- DimPlot(sc.filter, label = T, label.size = 6) + NoLegend() + ggtitle("Louvain clusters")
+p2 <- DimPlot(sc.filter, cells.highlight = cells.to.highlight, label = T, label.size = 6) + NoLegend() + ggtitle("BC_1755")
+p2
+ggsave("./plots/cells_highlight_dimplot_BC_1755.pdf", width = 5, height = 5)
+
+```
+# Phase example
+```{r}
+plotClusterEnrichment(sc.obj = sc.filter, 
+                                  group = "Phase", 
+                                  factor = "G1", 
+                                  idents = "seurat_clusters", 
+                                  threshold = 0.01,
+                                  order = T,
+                                  plot = T)
+ggsave("./plots/cluster_enrichment_Phase_G1.pdf", width = 5, height = 5)
+
+plotClusterEnrichment(sc.obj = sc.filter, 
+                                  group = "Phase", 
+                                  factor = "G2M", 
+                                  idents = "seurat_clusters", 
+                                  threshold = 0.01,
+                                  order = T,
+                                  plot = T)
+ggsave("./plots/cluster_enrichment_Phase_G2M.pdf", width = 5, height = 5)
+
+
+DimPlot(sc.filter, group.by = "Phase", cols = c("blue2", "green", "orange2"), pt.size = 0.5, shuffle = T, order = T) + ggtitle("Cell Cycle Phase")
+ggsave("./plots/cells_highlight_Phase.pdf", width = 5.5, height = 5)
+
+```
+
+
+
+# plot number of barcodes
+```{r}
+sc.filter$num.barcodes <- factor(unlist(lapply(strsplit(as.character(sc.filter$barcode), split = ",", perl = T), length)))
+DimPlot(sc.filter, split.by = "num.barcodes", label = T, label.size = 6, pt.size = 0.5)
+
+
+
+```
+
+## plot markers
+```{r}
+FeaturePlot(sc.filter, features = "Slpi", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Gata2", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Hspa5", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Cebpe", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Lyz2", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Stfa1", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Cstb", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Ifitm1", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "Ifitm3", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "B2m", min.cutoff = "q10", max.cutoff = "q90")
+
+
+FeaturePlot(sc.filter, features = "percent.mito", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "nCount_RNA", min.cutoff = "q10", max.cutoff = "q90")
+FeaturePlot(sc.filter, features = "nFeature_RNA", min.cutoff = "q10", max.cutoff = "q90")
+
+
+FeaturePlot(sc.filter, features = c("Slpi", "B2m"), min.cutoff = "q10", max.cutoff = "q90", blend = T, cols = c("red", "dodgerblue"), blend.threshold = 0.6)
+
+```
+
+
+```{r}
+DimPlot(sc.filter, reduction = "umap", group.by = 'Phase')
+ggsave("./plots/UMAP_cell_cycle_labelled.pdf")
+```
+
+## plotCellsInClusters
+```{r}
+plotCellsInClusters(sc.filter, group = "barcode", factor = "BC_1614", plot.pct = T)
+ggsave("./plots/cluster_percentage_BC_1614.pdf", width = 5, height = 5)
+
+plotCellsInClusters(sc.filter, group = "Phase", factor = "G1", plot.pct = T)
+ggsave("./plots/cluster_percentage_Phase_G1.pdf", width = 5, height = 5)
+
+plotCellsInClusters(sc.filter, group = "Phase", factor = "G2M", plot.pct = T)
+ggsave("./plots/cluster_percentage_Phase_G2M.pdf", width = 5, height = 5)
+
+plotCellsInClusters(sc.filter, group = "HTO_maxID", factor = "MA9-1", plot.pct = T)
+plotCellsInClusters(sc.filter, group = "HTO_maxID", factor = "MA9-2", plot.pct = T)
+
+```
+
+
+```{r}
+dat <- na.omit(sc.filter@meta.data %>% group_by(barcode) %>% tally() %>% arrange(desc(n)))
+top.10 <- (head(dat %>% arrange(desc(n)), 10))$barcode
+cells.select <- which(sc.filter$barcode %in% top.10)
+top.bc <- rep("no", nrow(sc.filter@meta.data))
+top.bc[cells.select] <- "yes"
+cells.select <- which(is.na(sc.filter$barcode))
+top.bc[cells.select] <- "undefined"
+sc.filter$top.bc <- as.factor(top.bc)
+
+# Top 10 barcodes
+pct.plot.dat <- sc.filter@meta.data %>%
+ dplyr::select(top.bc, seurat_clusters) %>%
+ group_by(top.bc, seurat_clusters) %>% tally() %>%
+ group_by(seurat_clusters) %>% dplyr::mutate(countT= sum(n)) %>% # <-- see here
+ group_by(top.bc, .add = T) %>%
+ mutate(per=round(100*n/countT,2))
+
+ggplot(pct.plot.dat, aes(y = seurat_clusters, x = per, fill = top.bc)) +
+  geom_bar(stat = "identity") + theme_bw() + scale_fill_manual(values = ggpubr::get_palette("npg", 4)[c(4,2,1)])
+ggsave("./plots/cluster_percentage_stacked_topbc.pdf", width = 5, height = 5)
+
+# Hashtag
+pct.plot.dat <- sc.filter@meta.data %>%
+ dplyr::select(HTO_classification, seurat_clusters) %>%
+ group_by(HTO_classification, seurat_clusters) %>% tally() %>%
+ group_by(seurat_clusters) %>% dplyr::mutate(countT= sum(n)) %>% # <-- see here
+ group_by(HTO_classification, .add = T) %>%
+ mutate(per=round(100*n/countT,2))
+
+ggplot(pct.plot.dat, aes(y = seurat_clusters, x = per, fill = HTO_classification)) +
+  geom_bar(stat = "identity") + theme_bw() + scale_fill_manual(values = ggpubr::get_palette("npg", 4)[c(4,2,1)])
+ggsave("./plots/cluster_percentage_stacked_hashtag.pdf", width = 5, height = 5)
+
+# Phase
+pct.plot.dat <- sc.filter@meta.data %>%
+ dplyr::select(Phase, seurat_clusters) %>%
+ group_by(Phase, seurat_clusters) %>% tally() %>%
+ group_by(seurat_clusters) %>% dplyr::mutate(countT= sum(n)) %>% # <-- see here
+ group_by(Phase, .add = T) %>%
+ mutate(per=round(100*n/countT,2))
+
+ggplot(pct.plot.dat, aes(y = seurat_clusters, x = per, fill = Phase)) +
+  geom_bar(stat = "identity") + theme_bw() + scale_fill_manual(values = ggpubr::get_palette("npg", 4)[c(4,2,1)])
+ggsave("./plots/cluster_percentage_stacked_Phase.pdf", width = 5, height = 5)
+
+# Detected
+pct.plot.dat <- sc.filter@meta.data %>%
+ dplyr::select(detected, seurat_clusters) %>%
+ group_by(detected, seurat_clusters) %>% tally() %>%
+ group_by(seurat_clusters) %>% dplyr::mutate(countT= sum(n)) %>% # <-- see here
+ group_by(detected, .add = T) %>%
+ mutate(per=round(100*n/countT,2))
+
+ggplot(pct.plot.dat, aes(y = seurat_clusters, x = per, fill = detected)) +
+  geom_bar(stat = "identity") + theme_bw() + scale_fill_manual(values = ggpubr::get_palette("npg", 4)[c(2,4)])
+ggsave("./plots/cluster_percentage_stacked_hashtag.pdf", width = 5, height = 5)
+
+
+```
+
+```{r}
+DimPlot(sc.filter, group.by = "top.bc", cols = ggpubr::get_palette("npg", 4)[c(4,2,1)], pt.size = 0.5, order = T)
+ggsave("./plots/cells_highlight_topbc.pdf", width = 5.5, height = 5)
+```
+## Cluster enrichment of top10 bc
+```{r}
+pdf("plotClusterEnrichment_top10.pdf", width = 6, height = 5, useDingbats = F)
+lapply(top.10, function(x){
+  plotClusterEnrichment(sc.obj = sc.filter, 
+                                  group = "barcode", 
+                                  factor = as.character(x), 
+                                  idents = "seurat_clusters", 
+                                  threshold = 0.01,
+                                  order = T,
+                                  plot = T)})
+dev.off()
+```
+
+## Dimplot enrichment of top10 bc
+```{r}
+sc.filter@meta.data
+top.10.cells <- lapply(top.10, function(x){
+  bc.dat <- sc.filter@meta.data[which(sc.filter$barcode == as.character(x)),]
+  return(rownames(bc.dat))
+})
+names(top.10.cells) <- top.10
+
+# top 4
+DimPlot(sc.filter, cells.highlight = top.10.cells[c(1,2,4,9)], cols.highlight = ggpubr::get_palette("npg", 5)[c(1,4,3,5)])
+ggsave("Dimplot_top4bc.pdf", width = 6.5, height = 6)
+
+# top 10
+DimPlot(sc.filter, cells.highlight = top.10.cells, 
+        cols.highlight = sample(c(ggpubr::get_palette("aaas", 10),ggpubr::get_palette("npg", 10)), 10, replace = F))
+ggsave("Dimplot_top10bc.pdf", width = 6.5, height = 6)
+
+```
+
+```{r}
+sessionInfo()
+```
+
