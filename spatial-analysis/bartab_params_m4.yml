@@ -1,0 +1,15 @@
+indir:              "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/saw_output/mouse4_spleen/00.mapping/"
+ref:                "/dawson_genomics/Projects/BGI_spatial/raw_data/splintr_reference/GFP_barcode_reference_library.fasta"
+mode:               "single-cell"
+input_type:         "fastq"
+pipeline:           "saw"
+outdir:             "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/splintr_preprocessing/bartab/mouse4_spleen/"
+upconstant:         "TGACCATGTACGATTGACTA"
+downconstant:       "TGCTAATGCGTACTGACTAG"
+alnmismatches:      2
+constantmismatches: 0.2
+barcode_length:     60
+min_readlength:     20
+max_cpus:           24
+max_memory:         "60.GB"
+max_time:           "20.h"
