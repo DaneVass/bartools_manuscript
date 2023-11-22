@@ -1,0 +1,597 @@
+---
+title: "Tool comparison"
+output: html_document
+---
+
+Comparison of BARtab bulk ref-free workflow on DNA-seq (barcode-seq) data from Goyal et al. 2023.
+
+Upstream scripts: `bartab_yogesh.sbatch`, `pycashier_yogesh.sbatch`, `timemachine_yogesh.sbatch`, `timemachine_yogesh_umis.sbatch`
+
+Data to compare:
+- published results based on UMI counts
+- timemachine re-analysis based on read counts
+- timemachine re-analysis based on UMI counts
+- BARtab re-ananlysis
+- pycashier re-analysis
+
+Metrics to compare:
+- detected barcodes
+- pearson and spearman correlation of barcode quantification per sample
+
+Steps
+1. Read in all data
+2. Collapse replicates for BARtab and pycashier by mean
+3. Detected barcode overlap between published data and timemachine re-analysis
+4. Detected barcode overlap between pycashier, BARtab, timemachine at different filtering thresholds
+5. Calculate pearson and spearman correlation of barcode quantification for all samples
+6. Visualize correlation of barcode quantification
+7. Visualize correlation of UMI and read count quantification
+
+(Published barcode quantification from Goyal 2023 is referred to as `yogesh`.)
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggvenn)
+library(bartools)
+```
+
+
+```{r}
+plots.dir <- "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/plots/"
+results.dir <- "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/"
+```
+
+## Load data
+
+Sample sheet for published Yogesh data, re-analysis with timemachine and BARtab.
+
+Sample sheet contains paths to count files and which samples are replicates.
+
+```{r}
+samplesheet <-
+  readxl::read_excel(
+    "/dawson_genomics/Projects/bartools_bartab_paper/scripts/yogesh_comparison/yogesh_comparison_samplesheet.xlsx"
+  )
+samplesheet <- as.data.frame(samplesheet)
+rownames(samplesheet) <- samplesheet$sample
+# samplesheet
+```
+
+Read in BARtab and timemachine results and published data into DGEList objects.
+
+```{r}
+# read in BARtab results
+samplesheet$files <- samplesheet$bartab_files
+bartab_results <-
+  edgeR::readDGE(
+    files = samplesheet,
+    labels = samplesheet$sample,
+    group = samplesheet$group,
+    header = F
+  )
+
+# read in published results from Yogesh paper
+samplesheet_y <- samplesheet %>%
+  select(group, yogesh_files) %>%
+  unique()
+samplesheet_y$files <- samplesheet_y$yogesh_files
+yogesh_results <-
+  edgeR::readDGE(
+    files = samplesheet_y,
+    labels = samplesheet_y$group,
+    group = samplesheet_y$group,
+    header = F
+  )
+
+
+# read in data re-analyzed with timemachine (read counts)
+samplesheet_t <- samplesheet %>%
+  select(group, timemachine_files) %>%
+  unique()
+samplesheet_t$files <- samplesheet_t$timemachine_files
+timemachine_reads_results <-
+  edgeR::readDGE(
+    files = samplesheet_t,
+    labels = samplesheet_t$group,
+    group = samplesheet_t$group,
+    header = F
+  )
+
+# read in data re-analyzed with timemachine (umi counts)
+samplesheet_t$files <- gsub("Reads", "UMIs", samplesheet_t$files)
+timemachine_umis_results <-
+  edgeR::readDGE(
+    files = samplesheet_t,
+    labels = samplesheet_t$group,
+    group = samplesheet_t$group,
+    header = F
+  )
+```
+
+Load pycashier results from combined table. 
+
+```{r}
+pycashier_counts <-
+  "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/pycashier_results_all_samples_d8/combined.tsv"
+pycashier_counts <- read.delim(pycashier_counts)
+
+pycashier_counts <- pycashier_counts %>%
+  pivot_wider(id_cols = sequence,
+              values_from = count,
+              names_from = sample)
+
+pycashier_counts[is.na(pycashier_counts)] <- 0
+pycashier_counts <- as.data.frame(pycashier_counts)
+rownames(pycashier_counts) <- pycashier_counts$sequence
+pycashier_counts$sequence <- NULL
+
+pycashier_results <-
+  edgeR::DGEList(
+    pycashier_counts,
+    samples = colnames(pycashier_counts),
+    group = gsub(
+      pattern = "_S.*",
+      replacement = "",
+      colnames(pycashier_counts)
+    )
+  )
+```
+
+## Preprocess BARtab results
+
+Check correlation between replicates to see whether samples should be collapsed by sum or mean. 
+
+```{r fig.height=10}
+plotBarcodeCorrelation(bartab_results, clustered = F, upper = F)
+```
+
+
+Good correlation between replicates, no undersampling, thus collapsing replicates with `mean`. 
+
+```{r}
+bartab_results_collapsed <-
+  bartools::collapseReplicates(bartab_results,
+                               method = "mean",
+                               group = "group")
+```
+
+## Preprocess pycashier results
+
+Collapse replicates with `mean`. 
+
+```{r}
+pycashier_results_collapsed <-
+  bartools::collapseReplicates(pycashier_results,
+                               method = "mean",
+                               group = "group")
+```
+
+Order samples in dataframes in the same way
+
+```{r}
+pycashier_results_collapsed <- pycashier_results_collapsed[,colnames(bartab_results_collapsed)]
+```
+
+
+
+## Comparison with timemachine
+
+Order samples in dataframes in the same way
+
+```{r}
+yogesh_results <- yogesh_results[,colnames(bartab_results_collapsed)]
+timemachine_reads_results <- timemachine_reads_results[,colnames(bartab_results_collapsed)]
+timemachine_umis_results <- timemachine_umis_results[,colnames(bartab_results_collapsed)]
+```
+
+### Barcode length
+
+Percentage of barcodes and barcode reads that are not 100bp long
+```{r}
+paste(
+  sum(str_length(rownames(timemachine_reads_results)) != 100) / nrow(timemachine_reads_results),
+  sum(timemachine_reads_results$counts[str_length(rownames(timemachine_reads_results)) != 100, ]) / sum(timemachine_reads_results$counts)
+)
+paste(
+  sum(str_length(rownames(bartab_results)) != 100) / nrow(bartab_results),
+  sum(bartab_results$counts[str_length(rownames(bartab_results)) != 100, ]) / sum(bartab_results$counts)
+)
+paste(
+  sum(str_length(rownames(pycashier_results)) != 100) / nrow(pycashier_results),
+  sum(pycashier_results$counts[str_length(rownames(pycashier_results)) != 100, ]) / sum(pycashier_results$counts)
+)
+```
+
+11.7% of barcodes and 0.10% or barcode reads from timemachine re-analysis are not 100 bases long.  
+Percentages are very similar in BARtab and pycashier. 
+
+```{r}
+paste(max(str_length(rownames(timemachine_reads_results))), min(str_length(rownames(timemachine_reads_results))))
+paste(max(str_length(rownames(bartab_results))), min(str_length(rownames(bartab_results))))
+paste(max(str_length(rownames(pycashier_results))), min(str_length(rownames(pycashier_results))))
+```
+
+Barcode lengths vary between 109 and 40 for timemachine,
+between 124 and 40 for BARtab and between 108 and 92 for pycashier.
+
+### Venn diagrams
+
+Venn diagram of barcodes detected in each of 5 samples.
+
+```{r}
+x <- list(
+  pycashier = rownames(pycashier_results), 
+  yogesh = rownames(yogesh_results), 
+  timemachine_umis = rownames(timemachine_umis_results),
+  timemachine_reads = rownames(timemachine_reads_results),
+  bartab = rownames(bartab_results)
+  )
+```
+
+1. Could we reproduce published results?
+2. What is the overlap between tools?
+
+```{r}
+ggvenn(
+  x, columns = c("yogesh", "timemachine_umis", "timemachine_reads"),
+  fill_color = c("#0073C2FF", "#EFC000FF", "#868686FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+ggsave(file.path(plots.dir, "venn_yogesh_timemachine_reads_umis.pdf"))
+```
+
+Overlap between detected barcodes between timemachine re-analyzed data and published data is 100%. 
+
+Filter barcodes within each sample that are below percentage threshold
+
+```{r}
+filterBarcodesPerSample <- function(counts, filterCutoff = 0.1) {
+  # transform barcode quantification into percentage within sample
+  barcodes.proportional <-
+    sweep(counts,
+          2,
+          colSums(counts),
+          `/`) * 100
+  
+  # set all barcodes below threshold to 0
+  barcodes.proportional[barcodes.proportional < filterCutoff] <- 0
+  
+  # remove all barcodes that are 0 across all samples (not detected)
+  barcodes.proportional <-
+    barcodes.proportional[rowSums(barcodes.proportional) != 0, ]
+  
+  return(barcodes.proportional)
+}
+```
+
+
+Filter barcodes at different thresholds for timemachine (read counts), pycashier and BARtab results. 
+
+```{r}
+x_filtered_.1 <- list(
+  pycashier = rownames(
+    filterBarcodesPerSample(pycashier_results_collapsed$counts, 0.1)
+  ),
+  yogesh = rownames(filterBarcodesPerSample(yogesh_results$counts, 0.1)),
+  timemachine_umis = rownames(
+    filterBarcodesPerSample(timemachine_umis_results$counts, 0.1)
+  ),
+  timemachine_reads = rownames(
+    filterBarcodesPerSample(timemachine_reads_results$counts, 0.1)
+  ),
+  bartab = rownames(
+    filterBarcodesPerSample(bartab_results_collapsed$counts, 0.1)
+  )
+)
+
+x_filtered_.01 <- list(
+  pycashier = rownames(
+    filterBarcodesPerSample(pycashier_results_collapsed$counts, 0.01)
+  ),
+  yogesh = rownames(filterBarcodesPerSample(yogesh_results$counts, 0.01)),
+  timemachine_umis = rownames(
+    filterBarcodesPerSample(timemachine_umis_results$counts, 0.01)
+  ),
+  timemachine_reads = rownames(
+    filterBarcodesPerSample(timemachine_reads_results$counts, 0.01)
+  ),
+  bartab = rownames(
+    filterBarcodesPerSample(bartab_results_collapsed$counts, 0.01)
+  )
+)
+
+x_filtered_.001 <- list(
+  pycashier = rownames(
+    filterBarcodesPerSample(pycashier_results_collapsed$counts, 0.001)
+  ),
+  yogesh = rownames(filterBarcodesPerSample(yogesh_results$counts, 0.001)),
+  timemachine_umis = rownames(
+    filterBarcodesPerSample(timemachine_umis_results$counts, 0.001)
+  ),
+  timemachine_reads = rownames(
+    filterBarcodesPerSample(timemachine_reads_results$counts, 0.001)
+  ),
+  bartab = rownames(
+    filterBarcodesPerSample(bartab_results_collapsed$counts, 0.001)
+  )
+)
+
+x_filtered_.0001 <- list(
+  pycashier = rownames(
+    filterBarcodesPerSample(pycashier_results_collapsed$counts, 0.0001)
+  ),
+  yogesh = rownames(filterBarcodesPerSample(yogesh_results$counts, 0.0001)),
+  timemachine_umis = rownames(
+    filterBarcodesPerSample(timemachine_umis_results$counts, 0.0001)
+  ),
+  timemachine_reads = rownames(
+    filterBarcodesPerSample(timemachine_reads_results$counts, 0.0001)
+  ),
+  bartab = rownames(
+    filterBarcodesPerSample(bartab_results_collapsed$counts, 0.0001)
+  )
+)
+```
+
+Create Venn diagrams of overlap of detected barcodes for different thresholds and no filtering.
+
+```{r}
+ggvenn(
+  x_filtered_.1,
+  columns = c("pycashier", "bartab", "timemachine_reads"),
+  fill_color = c("#CD534CFF", "#1AA11DC1", "#868686FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+ggsave(file.path(
+  plots.dir,
+  "venn_timemachine_reads_bartab_pycashier_0.1p.pdf"
+))
+
+ggvenn(
+  x_filtered_.01,
+  columns = c("pycashier", "bartab", "timemachine_reads"),
+  fill_color = c("#CD534CFF", "#1AA11DC1", "#868686FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+ggsave(file.path(
+  plots.dir,
+  "venn_timemachine_reads_bartab_pycashier_0.01p.pdf"
+))
+
+ggvenn(
+  x_filtered_.001,
+  columns = c("pycashier", "bartab", "timemachine_reads"),
+  fill_color = c("#CD534CFF", "#1AA11DC1", "#868686FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+ggsave(file.path(
+  plots.dir,
+  "venn_timemachine_reads_bartab_pycashier_0.001p.pdf"
+))
+
+ggvenn(
+  x_filtered_.0001,
+  columns = c("pycashier", "bartab", "timemachine_reads"),
+  fill_color = c("#CD534CFF", "#1AA11DC1", "#868686FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+ggsave(file.path(
+  plots.dir,
+  "venn_timemachine_reads_bartab_pycashier_0.0001p.pdf"
+))
+
+ggvenn(
+  x,
+  columns = c("pycashier", "bartab", "timemachine_reads"),
+  fill_color = c("#CD534CFF", "#1AA11DC1", "#868686FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+ggsave(file.path(plots.dir, "venn_timemachine_reads_bartab_pycashier.pdf"))
+```
+
+Check what percentage of barcodes detected by timemachine are also detected by BARtab/pycashier
+
+```{r}
+sum(x_filtered_.001[["timemachine_reads"]] %in% x_filtered_.001[["bartab"]]) / length(x_filtered_.001[["timemachine_reads"]])
+sum(x_filtered_.001[["timemachine_reads"]] %in% x_filtered_.001[["pycashier"]]) / length(x_filtered_.001[["timemachine_reads"]])
+```
+
+### Correlation of barcode quantification
+
+Data wrangling: combine results from timemachine (read count), pycashier and BARtab.
+
+```{r}
+bartab_long <- bartab_results_collapsed$counts %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode") %>%
+  pivot_longer(cols = -barcode,
+               values_to = "count",
+               names_to = "sample") %>%
+  mutate(dataset = "bartab")
+
+pycashier_long <- pycashier_results_collapsed$counts %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode") %>%
+  pivot_longer(cols = -barcode,
+               values_to = "count",
+               names_to = "sample") %>%
+  mutate(dataset = "pycashier")
+
+timemachine_reads_long <- timemachine_reads_results$counts %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode") %>%
+  pivot_longer(cols = -barcode,
+               values_to = "count",
+               names_to = "sample") %>%
+  mutate(dataset = "timemachine_reads")
+
+timemachine_umis_long <- timemachine_umis_results$counts %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode") %>%
+  pivot_longer(cols = -barcode,
+               values_to = "count",
+               names_to = "sample") %>%
+  mutate(dataset = "timemachine_umis")
+
+results_merged_long <- rbind(timemachine_reads_long, timemachine_umis_long, pycashier_long, bartab_long)
+
+results_merged_wideish <- results_merged_long %>%
+  pivot_wider(
+    id_cols = c(barcode, sample),
+    names_from = dataset,
+    values_from = count
+  ) %>%
+  mutate(barcode_length = str_length(barcode))
+
+results_merged_wideish[is.na(results_merged_wideish)] <- 0
+```
+
+Save intermediate results.
+
+```{r}
+write.csv(
+  results_merged_wideish,
+  file.path(results.dir, "bartab_timemachine_pycashier_counts_mean.csv")
+)
+results_merged_wideish <-
+  read.csv(
+    file.path(results.dir, "bartab_timemachine_pycashier_counts_mean.csv"),
+    row.names = 1
+  )
+```
+
+
+Calculate spearman and pearson correlation between timemachine (read count) and BARtab results.
+
+```{r}
+sp_cor_ls <- c()
+ps_cor_ls <- c()
+
+for (sample in colnames(timemachine_reads_results)) {
+  bc_counts_merged <- results_merged_wideish %>%
+    filter(sample == !!sample) %>%
+    # do not conside (0|0) points for correlation since samples have different barcode sets
+    filter(!(bartab == 0 & timemachine_reads == 0))
+  
+  sp_c <-
+    cor(bc_counts_merged$bartab,
+        bc_counts_merged$timemachine_reads,
+        method = "spearman")
+  sp_cor_ls <- c(sp_cor_ls, sp_c)
+  ps_c <-
+    cor(bc_counts_merged$bartab,
+        bc_counts_merged$timemachine_reads,
+        method = "pearson")
+  ps_cor_ls <- c(ps_cor_ls, ps_c)
+}
+```
+
+Convert to data frame. 
+
+```{r}
+cor_results <-
+  data.frame(list(
+    "spearman" = sp_cor_ls,
+    "pearson" = ps_cor_ls,
+    "sample" = colnames(timemachine_reads_results)
+  ))
+
+cor_results <- cor_results %>%
+  pivot_longer(cols = c(spearman, pearson), names_to = "method")
+```
+
+```{r}
+write.csv(
+  cor_results,
+  file.path(
+    results.dir,
+    "bartab_mean_timemachine_read_count_correlation.csv"
+  )
+)
+cor_results <-
+  read.csv(
+    file.path(
+      results.dir,
+      "bartab_mean_timemachine_read_count_correlation.csv"
+    ),
+    row.names = 1
+  )
+```
+
+
+Check minimum and maximum correlation. 
+
+```{r}
+cor_results %>%
+  group_by(method) %>%
+  summarise(min(value), max(value))
+```
+
+Plot box plot of correlation between time machine (read count) and BARtab barcode quantification.
+
+```{r fig.height=3, fig.width=4}
+ggplot(cor_results, aes(x = method, y = value, fill = method)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw()
+
+# ggsave(file.path(plots.dir, "violin_pearson_spearman_correlation.pdf"))
+ggsave(file.path(plots.dir, "boxplot_pearson_spearman_correlation_timemachine_reads_bartab.pdf"))
+```
+
+Add spearman correlation value to facet label.
+
+```{r}
+cor_labels <- cor_results %>%
+  filter(method == "spearman") %>%
+  mutate(label = paste0(sample, " (r=", round(value, 2), ")")) %>%
+  pull(label)
+
+names(cor_labels) <- cor_results %>%
+  filter(method == "spearman") %>% pull(sample)
+```
+
+Visualize correlation between BARtab and time machine for all samples in faceted point plot.
+
+```{r fig.height=15, fig.width=17}
+results_merged_wideish %>%
+  filter(bartab != 0 | timemachine_reads != 0) %>%
+  ggplot(aes(x = bartab, y = timemachine_reads)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(
+    ~ sample,
+    ncol = 5,
+    scales = "free",
+    labeller = labeller(sample = cor_labels)
+  ) +
+  theme_bw()
+
+ggsave(file.path(plots.dir, "timemachine_reads_bartab_spearman_point_facet.pdf"))
+```
+
+
+Comparing UMI and read counts from timemachine re-analysis. 
+
+```{r fig.height=15, fig.width=17}
+results_merged_wideish %>%
+  filter(timemachine_umis != 0 | timemachine_reads != 0) %>%
+  ggplot(aes(x = timemachine_umis, y = timemachine_reads)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(
+    ~ sample,
+    ncol = 5,
+    scales = "free"
+  ) +
+  theme_bw()
+
+ggsave(file.path(plots.dir, "timemachine_reads_umis_point_facet.pdf"))
+```
+
+
+

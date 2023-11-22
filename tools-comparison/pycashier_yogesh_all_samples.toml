@@ -1,0 +1,21 @@
+[extract]
+output = "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/pycashier_results_all_samples_d8/outs"
+pipeline = "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/pycashier_results_all_samples_d8/pipeline"
+quality = 20
+unqualified_percent = 20
+error = 0.1
+length = 100
+upstream_adapter = "GACTAAACGCGCTACTTGAT"
+downstream_adapter = "ATCCTACTTGTACAGCTCGT"
+ratio = 5
+distance = 8
+filter_percent = 0
+offset = 8
+input = "/scratch/users/hholze/BARtab/pycashier_yogesh_fastq"
+# filter_count =
+# fastp_args =
+
+[combine]
+input = "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/pycashier_results_all_samples_d8/outs"
+output = "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/pycashier_results_all_samples_d8/combined.tsv"
+

@@ -1,0 +1,15 @@
+indir: "/dawson_genomics/Projects/bartools_bartab_paper/scripts/yogesh_comparison/bartab_input/"
+mode: "single-bulk"
+outdir: "/dawson_genomics/Projects/bartools_bartab_paper/results/yogesh_comparison/bartab_results_all_samples_d8_variable_length/"
+max_cpus: 20
+max_memory: "32.GB"
+max_time: "24.h"
+up_coverage: 10
+down_coverage: 10
+min_readlength: 40
+constants: "both"
+constantmismatches: 0.1
+cluster_distance: 8
+cluster_ratio: 5
+upconstant: "GACTAAACGCGCTACTTGAT"
+downconstant: "ATCCTACTTGTACAGCTCGT"
