@@ -1,0 +1,982 @@
+---
+title: "Single-cell comparison BARtab FateMap"
+output: html_notebook
+---
+
+This notebook compares the results of barcode extraction from experiment FM02 from the original FateMap paper (Goyal et al. 2023). 
+
+```{r}
+library(tidyverse)
+library(ggvenn)
+```
+
+## Data loading and preprocessing
+
+```{r}
+results_dir <- "/dawson_genomics/Projects/bartools_bartab_paper/results/sc_yogesh_comparison/"
+plots_dir <- "/dawson_genomics/Projects/bartools_bartab_paper/results/sc_yogesh_comparison/plots/"
+```
+
+### Load whitelists
+
+Read in barcode whitelists to compare how many cells were annotated with barcodes. 
+Remove -1 ending of barcodes. 
+```{r}
+input1Directory <-
+  "/dawson_genomics/Projects/bartools_bartab_paper/yogesh_data/sc_data/"
+
+whitelist_s1 <- gsub("..$", "",
+                     read.table(
+                       paste0(input1Directory, "GSM7434409_FM02_A_1uMPLX_barcodes.tsv.gz"),
+                       stringsAsFactors = F
+                     )$V1)
+
+whitelist_s2 <- gsub("..$", "",
+                     read.table(
+                       paste0(input1Directory, "GSM7434410_FM02_B_100nMPLX_barcodes.tsv.gz"),
+                       stringsAsFactors = F
+                     )$V1)
+
+whitelist_s3 <- gsub("..$", "",
+                     read.table(
+                       paste0(input1Directory, "GSM7434411_FM02_C_5nMT_barcodes.tsv.gz"),
+                       stringsAsFactors = F
+                     )$V1)
+
+whitelist_s4 <- gsub("..$", "",
+                     read.table(
+                       paste0(input1Directory, "GSM7434412_FM02_D_5nMT100nMP_barcodes.tsv.gz"),
+                       stringsAsFactors = F
+                     )$V1)
+```
+
+### Load and preprocess FateMap results
+
+Read in FateMap results for FM02, remove unnecessary columns and uniq rows. 
+Code adapted from `https://github.com/arjunrajlaboratory/FateMap_Goyal2023/blob/main/plotScripts/FM01_to_FM05/FM02_sample1Sample2_V2_hg19.R`.
+
+Published preprocessed data contained cell barcodes not present in the whitelists. 
+Therefor, we re-ran FateMap with the provided code, using the published whitelists. 
+
+```{r}
+# home2Directory <- "/dawson_genomics/Projects/bartools_bartab_paper/yogesh_data/sc_data/Processed_FM01_FM03_FM04_FM05_FM06_FM08_FM09_FM10/FM02/"
+home2Directory <- "/dawson_genomics/Projects/bartools_bartab_paper/results/sc_yogesh_comparison/fatemap_results_fm02/stepThree/"
+barcode50 = as_tibble(read.table(
+  paste0(home2Directory, 'stepThreeStarcodeShavedReads.txt'),
+  stringsAsFactors = F,
+  header = F
+))
+barcode50 = barcode50 %>%
+  dplyr::rename(
+    cellID = V1,
+    UMI = V2,
+    BC50StarcodeD8 = V4,
+    sampleNum = V8
+  ) %>%
+  select(-c(V3, V5, V6, V7)) %>%
+  unique() %>%
+  select(-UMI)
+```
+
+Count UMIs per barcode per cell. 
+
+```{r}
+barcode50_counts <- barcode50 %>%
+  group_by(cellID, BC50StarcodeD8, sampleNum) %>%
+  summarise(nUMI = length(sampleNum))
+```
+
+Save intermediate results, because takes a lot of memory (>12GB) to load the data.  
+`barcode50_counts` is only 300MB
+
+```{r}
+write.csv(barcode50_counts, file.path(results_dir, "fm02_barcode50_counts.csv"))
+```
+
+```{r}
+barcode50_counts <- read.csv(file.path(results_dir, "fm02_barcode50_counts.csv"), row.names = 1)
+```
+
+Clear memory. 
+
+```{r}
+rm(barcode50)
+```
+
+Split into separate samples. 
+
+```{r}
+timemachine_s1 <- barcode50_counts %>%
+  filter(sampleNum == 1) %>%
+  select(-sampleNum) %>%
+  rename(bc.umi.count = nUMI, cellid = cellID, barcode = BC50StarcodeD8)
+
+timemachine_s2 <- barcode50_counts %>%
+  filter(sampleNum == 2) %>%
+  select(-sampleNum) %>%
+  rename(bc.umi.count = nUMI, cellid = cellID, barcode = BC50StarcodeD8)
+
+timemachine_s3 <- barcode50_counts %>%
+  filter(sampleNum == 3) %>%
+  select(-sampleNum) %>%
+  rename(bc.umi.count = nUMI, cellid = cellID, barcode = BC50StarcodeD8)
+
+timemachine_s4 <- barcode50_counts %>%
+  filter(sampleNum == 4) %>%
+  select(-sampleNum) %>%
+  rename(bc.umi.count = nUMI, cellid = cellID, barcode = BC50StarcodeD8)
+```
+
+Clear memory. 
+
+```{r}
+rm(barcode50_counts)
+```
+
+Number of cells per sample that were not present in the published whitelists. 
+
+```{r}
+sum(!unique(timemachine_s1$cellid) %in% whitelist_s1)
+sum(!unique(timemachine_s2$cellid) %in% whitelist_s2)
+sum(!unique(timemachine_s3$cellid) %in% whitelist_s3)
+sum(!unique(timemachine_s4$cellid) %in% whitelist_s4)
+```
+For published FateMap results: 
+[1] 61
+[1] 181
+[1] 31
+[1] 15
+
+Remove cells from timemachine output that are not in the whitelist. 
+Not necessary with the re-analyzed data. 
+
+```{r}
+# timemachine_s1 <- timemachine_s1[timemachine_s1$cellid %in% whitelist_s1,]
+# timemachine_s2 <- timemachine_s2[timemachine_s2$cellid %in% whitelist_s2,]
+# timemachine_s3 <- timemachine_s3[timemachine_s3$cellid %in% whitelist_s3,]
+# timemachine_s4 <- timemachine_s4[timemachine_s4$cellid %in% whitelist_s4,]
+```
+
+QC plots for FateMap. 
+
+```{r}
+bartools::plotBarcodesPerCell(timemachine_s1)
+ggsave(file.path(plots_dir, "FateMap_barcodes_per_cell_FM02_S1.pdf"))
+bartools::plotUmiPerBarcode(timemachine_s1)
+ggsave(file.path(plots_dir, "FateMap_umi_per_barcode_FM02_S1.pdf"))
+bartools::plotUmiFilterThresholds(timemachine_s1)
+ggsave(file.path(plots_dir, "FateMap_umi_filter_thresholds_FM02_S1.pdf"))
+
+bartools::plotBarcodesPerCell(timemachine_s2)
+ggsave(file.path(plots_dir, "FateMap_barcodes_per_cell_FM02_S2.pdf"))
+bartools::plotUmiPerBarcode(timemachine_s2)
+ggsave(file.path(plots_dir, "FateMap_umi_per_barcode_FM02_S2.pdf"))
+bartools::plotUmiFilterThresholds(timemachine_s2)
+ggsave(file.path(plots_dir, "FateMap_umi_filter_thresholds_FM02_S2.pdf"))
+
+bartools::plotBarcodesPerCell(timemachine_s3)
+ggsave(file.path(plots_dir, "FateMap_barcodes_per_cell_FM02_S3.pdf"))
+bartools::plotUmiPerBarcode(timemachine_s3)
+ggsave(file.path(plots_dir, "FateMap_umi_per_barcode_FM02_S3.pdf"))
+bartools::plotUmiFilterThresholds(timemachine_s3)
+ggsave(file.path(plots_dir, "FateMap_umi_filter_thresholds_FM02_S3.pdf"))
+
+bartools::plotBarcodesPerCell(timemachine_s4)
+ggsave(file.path(plots_dir, "FateMap_barcodes_per_cell_FM02_S4.pdf"))
+bartools::plotUmiPerBarcode(timemachine_s4)
+ggsave(file.path(plots_dir, "FateMap_umi_per_barcode_FM02_S4.pdf"))
+bartools::plotUmiFilterThresholds(timemachine_s4)
+ggsave(file.path(plots_dir, "FateMap_umi_filter_thresholds_FM02_S4.pdf"))
+```
+
+### Load BARtab results
+
+Read in BARtab results.
+
+```{r}
+bartab_s1 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp/counts/1-1uMPLX_S1.counts.tsv"))
+bartab_s2 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp/counts/2-100nMPLX_S2.counts.tsv"))
+bartab_s3 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp/counts/3-5nMT_S3.counts.tsv"))
+bartab_s4 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp/counts/4-5nMT100nMP_S4.counts.tsv"))
+```
+
+Read in BARtab results without UMI error correction. 
+
+```{r}
+bartab_no_umi_s1 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp_no_umi/counts/1-1uMPLX_S1.counts.tsv"))
+bartab_no_umi_s2 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp_no_umi/counts/2-100nMPLX_S2.counts.tsv"))
+bartab_no_umi_s3 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp_no_umi/counts/3-5nMT_S3.counts.tsv"))
+bartab_no_umi_s4 <- bartools::readBartabCounts(file.path(results_dir, "bartab_results_fm02_d8_50bp_no_umi/counts/4-5nMT100nMP_S4.counts.tsv"))
+```
+
+
+```{r}
+bartools::plotBarcodesPerCell(bartab_s1)
+ggsave(file.path(plots_dir, "BARtab_barcodes_per_cell_FM02_S1.pdf"))
+bartools::plotUmiPerBarcode(bartab_s1)
+ggsave(file.path(plots_dir, "BARtab_umi_per_barcode_FM02_S1.pdf"))
+bartools::plotUmiFilterThresholds(bartab_s1)
+ggsave(file.path(plots_dir, "BARtab_umi_filter_thresholds_FM02_S1.pdf"))
+
+bartools::plotBarcodesPerCell(bartab_s2)
+ggsave(file.path(plots_dir, "BARtab_barcodes_per_cell_FM02_S2.pdf"))
+bartools::plotUmiPerBarcode(bartab_s2)
+ggsave(file.path(plots_dir, "BARtab_umi_per_barcode_FM02_S2.pdf"))
+bartools::plotUmiFilterThresholds(bartab_s2)
+ggsave(file.path(plots_dir, "BARtab_umi_filter_thresholds_FM02_S2.pdf"))
+
+bartools::plotBarcodesPerCell(bartab_s3)
+ggsave(file.path(plots_dir, "BARtab_barcodes_per_cell_FM02_S3.pdf"))
+bartools::plotUmiPerBarcode(bartab_s3)
+ggsave(file.path(plots_dir, "BARtab_umi_per_barcode_FM02_S3.pdf"))
+bartools::plotUmiFilterThresholds(bartab_s3)
+ggsave(file.path(plots_dir, "BARtab_umi_filter_thresholds_FM02_S3.pdf"))
+
+bartools::plotBarcodesPerCell(bartab_s4)
+ggsave(file.path(plots_dir, "BARtab_barcodes_per_cell_FM02_S4.pdf"))
+bartools::plotUmiPerBarcode(bartab_s4)
+ggsave(file.path(plots_dir, "BARtab_umi_per_barcode_FM02_S4.pdf"))
+bartools::plotUmiFilterThresholds(bartab_s4)
+ggsave(file.path(plots_dir, "BARtab_umi_filter_thresholds_FM02_S4.pdf"))
+
+bartools::plotBarcodesPerCell(bartab_no_umi_s1)
+bartools::plotUmiPerBarcode(bartab_no_umi_s1)
+bartools::plotUmiFilterThresholds(bartab_no_umi_s1)
+```
+
+
+## Compare FateMap vs. BARtab
+
+### Number of cells annotated with barcodes
+
+Across all conditions
+
+
+BARtab 39636 cells, FateMap 39663 cells, whitelists 39884 cells
+
+VennDiagram of cells annotated with barcodes
+
+```{r}
+bartab_cells <-
+  rbind(
+    mutate(bartab_s1, cellid_sample = paste0(cellid, "_S1")),
+    mutate(bartab_s2, cellid_sample = paste0(cellid, "_S2")),
+    mutate(bartab_s3, cellid_sample = paste0(cellid, "_S3")),
+    mutate(bartab_s4, cellid_sample = paste0(cellid, "_S4"))
+  )
+
+timemachine_cells <-
+  rbind(
+    mutate(timemachine_s1, cellid_sample = paste0(cellid, "_S1")),
+    mutate(timemachine_s2, cellid_sample = paste0(cellid, "_S2")),
+    mutate(timemachine_s3, cellid_sample = paste0(cellid, "_S3")),
+    mutate(timemachine_s4, cellid_sample = paste0(cellid, "_S4"))
+  )
+
+whitelist_cells <-
+  c(
+    paste0(whitelist_s1, "_S1"),
+    paste0(whitelist_s2, "_S2"),
+    paste0(whitelist_s3, "_S3"),
+    paste0(whitelist_s4, "_S4")
+  )
+```
+
+```{r}
+length(unique(bartab_cells$cellid_sample))
+length(unique(timemachine_cells$cellid_sample))
+length(whitelist_cells)
+```
+
+```{r}
+x <- list(
+  BARtab = sort(unique(bartab_cells$cellid_sample)),
+  FateMap = sort(unique(timemachine_cells$cellid_sample)),
+  Whitelists = sort(whitelist_cells)
+)
+
+ggvenn(
+  x,
+  columns = c("BARtab", "FateMap", "Whitelists"),
+  fill_color = c("#0073C2FF", "#EFC000FF", "#A83232"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+
+ggsave(
+  file.path(
+    plots_dir,
+    "venn_cells_with_barcodes_bartab_fatemap_whitelists_FM02.pdf"
+  ),
+  width = 7,
+  height = 5
+)
+```
+
+```{r}
+ggvenn(
+  x,
+  columns = c("BARtab", "FateMap"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5,
+  set_name_size = 5
+)
+
+ggsave(
+  file.path(
+    plots_dir,
+    "venn_cells_with_barcodes_bartab_fatemap_FM02.pdf"
+  ),
+  width = 7,
+  height = 5
+)
+```
+
+
+### Number and percent of cells with 1 barcode annotated
+
+Count number of cells annotated with 1 barcode at different UMI thresholds and the percentage of cells annotated with 1 barcode. 
+
+By increasing the UMI threshold, you will get cleaner data and a higher percentage of cells with 1 barcode but at the same time overall potentially annotate less cells. 
+
+Compare between BARtab, BARtab without umi correction and Timemachine for all 4 samples in FM02. 
+
+```{r}
+count_singlets_thresholds <-
+  function(bc_objects, filter_range = 15) {
+    singlet_res <- lapply(bc_objects, function (bc) {
+      res_filtering <- list()
+      # umi cutoff is increasing
+      # to save compute time, use the filtered object to increase the umi threshold.
+      bc_filtered <- bc
+      for (i in seq(filter_range)) {
+        bc_filtered <-
+          bartools::filterBarcodes(bc_filtered, umiCountFilter = i, umiFractionFilter = 0)
+        bc_singlets <- bc_filtered %>%
+          group_by(cellid) %>%
+          mutate(nLineages = length(cellid)) %>%
+          filter(nLineages <= 1) %>%
+          nrow()
+        
+        # perecent singlets of cells annotated with cutoff
+        bc_perc_singlets <-
+          bc_singlets / length(unique(bc_filtered$cellid))
+        
+        # percent singlets of all cells annotated
+        bc_perc_singlets_total <-
+          bc_singlets / length(unique(bc$cellid))
+        
+        res_filtering[[i]] <- c(bc_singlets, bc_perc_singlets, bc_perc_singlets_total)
+      }
+      return(res_filtering)
+    })
+    return(singlet_res)
+  }
+```
+
+```{r}
+singlet_counts_s1 <-
+  count_singlets_thresholds(list(bartab_s1, bartab_no_umi_s1, timemachine_s1), 15)
+singlet_counts_s2 <-
+  count_singlets_thresholds(list(bartab_s2, bartab_no_umi_s2, timemachine_s2), 15)
+singlet_counts_s3 <-
+  count_singlets_thresholds(list(bartab_s3, bartab_no_umi_s3, timemachine_s3), 15)
+singlet_counts_s4 <-
+  count_singlets_thresholds(list(bartab_s4, bartab_no_umi_s4, timemachine_s4), 15)
+```
+
+```{r}
+res_filtering_df_s1 <- cbind(data.frame(t(sapply(
+  lapply(singlet_counts_s1[[1]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s1[[2]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s1[[3]], unlist), c
+))))
+colnames(res_filtering_df_s1) <-
+  c(
+    "bartab_cells",
+    "bartab_cells_perc",
+    "bartab_cells_perc_total",
+    "bartab_no_umi_cells",
+    "bartab_no_umi_cells_perc",
+    "bartab_no_umi_cells_perc_total",
+    "timemachine_cells",
+    "timemachine_cells_perc",
+    "timemachine_cells_perc_total"
+  )
+res_filtering_df_s1$umi_threshold <- seq(15)
+res_filtering_df_s1$sample <- "S1"
+
+res_filtering_df_s2 <- cbind(data.frame(t(sapply(
+  lapply(singlet_counts_s2[[1]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s2[[2]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s2[[3]], unlist), c
+))))
+colnames(res_filtering_df_s2) <-
+  c(
+    "bartab_cells",
+    "bartab_cells_perc",
+    "bartab_cells_perc_total",
+    "bartab_no_umi_cells",
+    "bartab_no_umi_cells_perc",
+    "bartab_no_umi_cells_perc_total",
+    "timemachine_cells",
+    "timemachine_cells_perc",
+    "timemachine_cells_perc_total"
+  )
+res_filtering_df_s2$umi_threshold <- seq(15)
+res_filtering_df_s2$sample <- "S2"
+
+res_filtering_df_s3 <- cbind(data.frame(t(sapply(
+  lapply(singlet_counts_s3[[1]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s3[[2]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s3[[3]], unlist), c
+))))
+colnames(res_filtering_df_s3) <-
+  c(
+    "bartab_cells",
+    "bartab_cells_perc",
+    "bartab_cells_perc_total",
+    "bartab_no_umi_cells",
+    "bartab_no_umi_cells_perc",
+    "bartab_no_umi_cells_perc_total",
+    "timemachine_cells",
+    "timemachine_cells_perc",
+    "timemachine_cells_perc_total"
+  )
+res_filtering_df_s3$umi_threshold <- seq(15)
+res_filtering_df_s3$sample <- "S3"
+
+res_filtering_df_s4 <- cbind(data.frame(t(sapply(
+  lapply(singlet_counts_s4[[1]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s4[[2]], unlist), c
+))), data.frame(t(sapply(
+  lapply(singlet_counts_s4[[3]], unlist), c
+))))
+colnames(res_filtering_df_s4) <-
+  c(
+    "bartab_cells",
+    "bartab_cells_perc",
+    "bartab_cells_perc_total",
+    "bartab_no_umi_cells",
+    "bartab_no_umi_cells_perc",
+    "bartab_no_umi_cells_perc_total",
+    "timemachine_cells",
+    "timemachine_cells_perc",
+    "timemachine_cells_perc_total"
+  )
+res_filtering_df_s4$umi_threshold <- seq(15)
+res_filtering_df_s4$sample <- "S4"
+```
+
+```{r}
+combined_res_filtering_df <-
+  rbind(
+    res_filtering_df_s1,
+    res_filtering_df_s2,
+    res_filtering_df_s3,
+    res_filtering_df_s4
+  )
+```
+
+```{r}
+head(combined_res_filtering_df)
+```
+
+Save intermediate results.
+
+```{r}
+write.csv(combined_res_filtering_df,
+          file.path(results_dir, "fm02_umi_threshold_comp.csv"))
+```
+
+Plot number and percent of cells with a single barcode annotated. 
+
+```{r}
+combined_res_filtering_df %>%
+  rename(
+    `BARtab` = bartab_cells,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells,
+    FateMap = timemachine_cells
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method",
+    values_to = "cells"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells, color = method)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ sample) +
+  ylab("Cells with 1 barcode annotated") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "cells_1_barcode_FM02.pdf"),
+  width = 7,
+  height = 5
+)
+```
+
+```{r}
+combined_res_filtering_df %>%
+  rename(
+    `BARtab` = bartab_cells_perc,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells_perc,
+    FateMap = timemachine_cells_perc
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method_perc",
+    values_to = "cells_perc"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells_perc * 100, color = method_perc)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ sample) +
+  ylab("Cells with 1 barcode annotated (%)") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "perc_cells_1_barcode_FM02.pdf"),
+  width = 7,
+  height = 5
+)
+```
+
+```{r}
+combined_res_filtering_df %>%
+  rename(
+    `BARtab` = bartab_cells_perc_total,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells_perc_total,
+    FateMap = timemachine_cells_perc_total
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method_perc",
+    values_to = "cells_perc"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells_perc * 100, color = method_perc)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~ sample) +
+  ylab("Cells with 1 barcode annotated (%)") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "perc_total_cells_1_barcode_FM02.pdf"),
+  width = 7,
+  height = 5
+)
+```
+
+
+Only sample 1
+
+```{r fig.height=3.5}
+combined_res_filtering_df %>%
+  filter(sample == "S1") %>%
+  rename(
+    `BARtab` = bartab_cells,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells,
+    FateMap = timemachine_cells
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method",
+    values_to = "cells"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells, color = method)) +
+  geom_point() +
+  geom_line() +
+  ylab("Cells with 1 barcode annotated") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "cells_1_barcode_FM02_S1.pdf"),
+  width = 4.9,
+  height = 3.5
+)
+```
+
+
+```{r fig.height=3.5}
+combined_res_filtering_df %>%
+  filter(sample == "S1") %>%
+  rename(
+    `BARtab` = bartab_cells_perc,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells_perc,
+    FateMap = timemachine_cells_perc
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method_perc",
+    values_to = "cells_perc"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells_perc * 100, color = method_perc)) +
+  geom_point() +
+  geom_line() +
+  ylab("Cells with 1 barcode annotated (%)") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "perc_cells_1_barcode_FM02_S1.pdf"),
+  width = 4.9,
+  height = 3.5
+)
+```
+
+```{r}
+combined_res_filtering_df %>%
+  filter(sample == "S1") %>%
+  rename(
+    `BARtab` = bartab_cells_perc_total,
+    `BARtab w/o UMI\nerror correction` = bartab_no_umi_cells_perc_total,
+    FateMap = timemachine_cells_perc_total
+  ) %>%
+  pivot_longer(
+    cols = c(`BARtab`, `BARtab w/o UMI\nerror correction`, `FateMap`),
+    names_to = "method_perc",
+    values_to = "cells_perc"
+  ) %>%
+  ggplot(aes(x = umi_threshold, y = cells_perc * 100, color = method_perc)) +
+  geom_point() +
+  geom_line() +
+  ylab("Cells with 1 barcode annotated (%)") +
+  xlab("UMI threshold") +
+  theme_bw()
+
+ggsave(
+  file.path(plots_dir, "perc_total_cells_1_barcode_FM02_S1.pdf"),
+  width = 4.9,
+  height = 3.5
+)
+```
+
+
+
+#####################################################################################
+#####################################################################################
+
+### Comparison detected barcodes and clone size
+
+Filtering barcodes based on UMI count
+
+```{r}
+bartab_s1_filtered <-
+  bartools::filterBarcodes(bartab_s1,
+                           umiCountFilter = 5,
+                           umiFractionFilter = 0)
+timemachine_s1_filtered <-
+  bartools::filterBarcodes(timemachine_s1,
+                           umiCountFilter = 15,
+                           umiFractionFilter = 0)
+
+bartab_s2_filtered <-
+  bartools::filterBarcodes(bartab_s2,
+                           umiCountFilter = 5,
+                           umiFractionFilter = 0)
+timemachine_s2_filtered <-
+  bartools::filterBarcodes(timemachine_s2,
+                           umiCountFilter = 15,
+                           umiFractionFilter = 0)
+
+bartab_s3_filtered <-
+  bartools::filterBarcodes(bartab_s3,
+                           umiCountFilter = 5,
+                           umiFractionFilter = 0)
+timemachine_s3_filtered <-
+  bartools::filterBarcodes(timemachine_s3,
+                           umiCountFilter = 15,
+                           umiFractionFilter = 0)
+
+bartab_s4_filtered <-
+  bartools::filterBarcodes(bartab_s4,
+                           umiCountFilter = 5,
+                           umiFractionFilter = 0)
+timemachine_s4_filtered <-
+  bartools::filterBarcodes(timemachine_s4,
+                           umiCountFilter = 15,
+                           umiFractionFilter = 0)
+```
+
+Examplary QC plot for filtered data
+
+```{r}
+bartools::plotBarcodesPerCell(bartab_s1_filtered)
+ggsave(
+  file.path(plots_dir, "BARtab_barcodes_per_cell_FM02_S1_filtered.pdf"),
+  width = 7,
+  height = 5
+)
+bartools::plotBarcodesPerCell(timemachine_s1_filtered)
+ggsave(
+  file.path(plots_dir, "FateMap_barcodes_per_cell_FM02_S1_filtered.pdf"),
+  width = 7,
+  height = 5
+)
+```
+
+
+Aggregate barcodes per cell and remove all cells with multiple barcodes detected (as it is done in FateMap publication).
+
+```{r}
+bartab_s1_agg <- bartools::aggregateBarcodes(bartab_s1_filtered)
+timemachine_s1_agg <-
+  bartools::aggregateBarcodes(timemachine_s1_filtered)
+
+bartab_s1_singlets <- bartab_s1_agg %>%
+  filter(!grepl(";", barcode))
+
+timemachine_s1_singlets <- timemachine_s1_agg %>%
+  filter(!grepl(";", barcode))
+
+bartab_s2_agg <- bartools::aggregateBarcodes(bartab_s2_filtered)
+timemachine_s2_agg <-
+  bartools::aggregateBarcodes(timemachine_s2_filtered)
+
+bartab_s2_singlets <- bartab_s2_agg %>%
+  filter(!grepl(";", barcode))
+
+timemachine_s2_singlets <- timemachine_s2_agg %>%
+  filter(!grepl(";", barcode))
+
+bartab_s3_agg <- bartools::aggregateBarcodes(bartab_s3_filtered)
+timemachine_s3_agg <-
+  bartools::aggregateBarcodes(timemachine_s3_filtered)
+
+bartab_s3_singlets <- bartab_s3_agg %>%
+  filter(!grepl(";", barcode))
+
+timemachine_s3_singlets <- timemachine_s3_agg %>%
+  filter(!grepl(";", barcode))
+
+bartab_s4_agg <- bartools::aggregateBarcodes(bartab_s4_filtered)
+timemachine_s4_agg <-
+  bartools::aggregateBarcodes(timemachine_s4_filtered)
+
+bartab_s4_singlets <- bartab_s4_agg %>%
+  filter(!grepl(";", barcode))
+
+timemachine_s4_singlets <- timemachine_s4_agg %>%
+  filter(!grepl(";", barcode))
+```
+
+
+Venn diagrams of barcodes detected
+
+```{r}
+x <- list(
+  FateMap_S1 = unique(timemachine_s1_singlets$barcode),
+  BARtab_S1 = unique(bartab_s1_singlets$barcode),
+  FateMap_S2 = unique(timemachine_s2_singlets$barcode),
+  BARtab_S2 = unique(bartab_s2_singlets$barcode),
+  FateMap_S3 = unique(timemachine_s3_singlets$barcode),
+  BARtab_S3 = unique(bartab_s3_singlets$barcode),
+  FateMap_S4 = unique(timemachine_s4_singlets$barcode),
+  BARtab_S4 = unique(bartab_s4_singlets$barcode)
+  )
+
+ggvenn(
+  x, columns = c("FateMap_S1", "BARtab_S1"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x, columns = c("FateMap_S2", "BARtab_S2"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x, columns = c("FateMap_S3", "BARtab_S3"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x, columns = c("FateMap_S4", "BARtab_S4"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+```
+
+Barcodes detected in at least 2 cells. 
+
+```{r}
+x_2c <- list(
+  FateMap_S1 = unique(timemachine_s1_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  BARtab_S1 = unique(bartab_s1_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  FateMap_S2 = unique(timemachine_s2_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  BARtab_S2 = unique(bartab_s2_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  FateMap_S3 = unique(timemachine_s3_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  BARtab_S3 = unique(bartab_s3_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  FateMap_S4 = unique(timemachine_s4_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode)),
+  BARtab_S4 = unique(bartab_s4_singlets %>% group_by(barcode) %>% summarise(count = n()) %>% filter(count > 1) %>% pull(barcode))
+  )
+
+ggvenn(
+  x_2c, columns = c("FateMap_S1", "BARtab_S1"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x_2c, columns = c("FateMap_S2", "BARtab_S2"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x_2c, columns = c("FateMap_S3", "BARtab_S3"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+
+ggvenn(
+  x_2c, columns = c("FateMap_S4", "BARtab_S4"),
+  fill_color = c("#0073C2FF", "#EFC000FF"),
+  stroke_size = 0.5, set_name_size = 5
+  )
+```
+
+
+### Correlation clone size by #cells annotated
+
+```{r}
+s1_clone_size_merged <-
+  merge(
+    bartab_s1_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    timemachine_s1_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    by = "barcode",
+    suffixes = c("_BARtab", "_FateMap"),
+    all = T
+  ) %>%
+  mutate(sample = "S1")
+
+s2_clone_size_merged <-
+  merge(
+    bartab_s2_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    timemachine_s2_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    by = "barcode",
+    suffixes = c("_BARtab", "_FateMap"),
+    all = T
+  ) %>%
+  mutate(sample = "S2")
+
+s3_clone_size_merged <-
+  merge(
+    bartab_s3_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    timemachine_s3_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    by = "barcode",
+    suffixes = c("_BARtab", "_FateMap"),
+    all = T
+  ) %>%
+  mutate(sample = "S3")
+
+s4_clone_size_merged <-
+  merge(
+    bartab_s4_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    timemachine_s4_singlets %>% group_by(barcode) %>% summarise(count = n()),
+    by = "barcode",
+    suffixes = c("_BARtab", "_FateMap"),
+    all = T
+  ) %>%
+  mutate(sample = "S4")
+```
+
+```{r}
+all_samples_clone_size <-
+  rbind(
+    s1_clone_size_merged,
+    s2_clone_size_merged,
+    s3_clone_size_merged,
+    s4_clone_size_merged
+  ) %>%
+  mutate(
+    count_BARtab = replace_na(count_BARtab, 0),
+    count_FateMap = replace_na(count_FateMap, 0)
+  )
+```
+
+```{r}
+write.csv(
+  all_samples_clone_size,
+  file.path(results_dir, "fm02_barcode50_clone_sizes.csv")
+)
+```
+
+Calculate correlation of clone sizes between FateMap and BARtab.
+
+```{r}
+sp_cor_ls <- c()
+ps_cor_ls <- c()
+
+for (sample in c("S1", "S2", "S3", "S4")) {
+  bc_counts_merged <- all_samples_clone_size %>%
+    filter(sample == !!sample)
+  
+  sp_c <-
+    cor(bc_counts_merged$count_BARtab,
+        bc_counts_merged$count_FateMap,
+        method = "spearman")
+  sp_cor_ls <- c(sp_cor_ls, sp_c)
+  ps_c <-
+    cor(bc_counts_merged$count_BARtab,
+        bc_counts_merged$count_FateMap,
+        method = "pearson")
+  ps_cor_ls <- c(ps_cor_ls, ps_c)
+}
+```
+
+```{r}
+cor_results <-
+  data.frame(list(
+    "spearman" = sp_cor_ls,
+    "pearson" = ps_cor_ls,
+    "sample" = c("S1", "S2", "S3", "S4")
+  ))
+
+cor_results <- cor_results %>%
+  pivot_longer(cols = c(spearman, pearson), names_to = "method")
+```
+
+```{r}
+cor_labels <- cor_results %>%
+  filter(method == "pearson") %>%
+  mutate(label = paste0(sample, " (r=", round(value, 3), ")")) %>%
+  pull(label)
+
+names(cor_labels) <- cor_results %>%
+  filter(method == "pearson") %>% pull(sample)
+```
+
+
+
+```{r}
+all_samples_clone_size %>%
+  ggplot(aes(x=count_BARtab, y=count_FateMap)) +
+  geom_abline(slope=1, intercept = 0, linetype=2, alpha=0.4, color="blue") +
+  geom_point(alpha=0.3, size=1) +
+  coord_equal() +
+  facet_wrap(~sample,
+             labeller = labeller(sample = cor_labels)) +
+  ylab("clone size FateMap") +
+  xlab("clone size BARtab") +
+  theme_bw()
+
+ggsave(file.path(plots_dir, "clone_size_filtered_1bc_FM02.pdf"))
+```
+

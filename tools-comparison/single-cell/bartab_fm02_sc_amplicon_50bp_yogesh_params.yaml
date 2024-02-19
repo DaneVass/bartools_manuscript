@@ -1,0 +1,20 @@
+indir:                "bartab_input_fm02/"
+whitelist_indir:      "bartab_input_fm02/"
+mode:                 "single-cell"
+input_type:           "fastq"
+complexity_threshold: 65
+minqual:              15
+pctqual:               70
+constants:            "up"
+upconstant:           "GGACGAGCTGTACAAGTAGG"
+up_coverage:          20
+min_readlength:       50
+constantmismatches:   0.2
+cluster_distance:     8
+cluster_ratio:        5
+cb_umi_pattern:       "CCCCCCCCCCCCCCCCNNNNNNNNNN"
+umi_dist:             1
+outdir:               "/dawson_genomics/Projects/bartools_bartab_paper/results/sc_yogesh_comparison/bartab_results_fm02_d8_50bp/"
+max_memory:           "32.GB"
+max_cpus:             24
+
