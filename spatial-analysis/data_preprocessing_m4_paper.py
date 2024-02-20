@@ -29,10 +29,14 @@ def bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_
         gef_raw_path=gef_path_m4,
         bin_size=bin_size
     )
-
+    
     # already check if spot is in adata, for QC plot
     bc_data["isin_adata"] = bc_data["cell_id"].isin(adata.obs.index.values)
-
+    
+    # save barcode data with all barcodes per bin, and all bins
+    bc_data.to_csv(f"{out_path}/mouse4_bin{bin_size}_bc_counts.tsv", sep="\t")
+    
+    # only keep most abundant barcode per bin
     bc_data = bc_data.sort_values("count_binned", ascending=False).groupby('cell_id').head(1)
 
     # create column to merge on
@@ -54,7 +58,7 @@ def bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_
 
     # export barcode counts on tissue section for bar plot
     adata.obs["barcode"][~adata.obs["barcode"].isna()].value_counts().to_csv(
-        f"{out_path}/mouse4_bin{bin_size}_bc_counts.tsv", sep="\t"
+        f"{out_path}/mouse4_bin{bin_size}_bc_counts_top1.tsv", sep="\t"
     )
     return(adata)
 
@@ -103,13 +107,21 @@ gem_path_m4 = "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/saw_outpu
 gef_path_m4 = "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/saw_output/mouse4_spleen/image_no_cellbin/04.tissuecut/SS200000412TL_C2.gef"
 bc_path_m4 = "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/splintr_preprocessing/bartab/mouse4_spleen/counts/DP8400029990TL_L01_read_1.unmapped_reads.counts.tsv"
 
-out_path = "/dawson_genomics/Projects/BGI_spatial/plots_paper/input_data/"
+out_path = "/dawson_genomics/Projects/BGI_spatial/plots_paper/input_data_revision/"
 
+# QC thresholds for bin size 20 and 40 are estimated based on histograms of bin size 10 and 50
 bin_size = 50
 adata = bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_path)
 filter_cluster(adata, bin_size, out_path, min_counts=600)
 
+bin_size = 40
+adata = bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_path)
+filter_cluster(adata, bin_size, out_path, min_counts=400)
+
+bin_size = 20
+adata = bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_path)
+filter_cluster(adata, bin_size, out_path, min_counts=100)
+
 bin_size = 10
 adata = bin_trascripts_barcodes(bin_size, gem_path_m4, gef_path_m4, bc_path_m4, out_path)
 filter_cluster(adata, bin_size, out_path, min_counts=30, max_counts = 600)
-
