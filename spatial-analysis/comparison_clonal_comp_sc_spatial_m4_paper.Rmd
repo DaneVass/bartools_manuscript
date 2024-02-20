@@ -1,0 +1,267 @@
+---
+title: "Comparison scRNA-seq and spatial data"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(bartools)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(data.table)
+library(UpSetR)
+library(grid)
+library(ggrepel)
+```
+
+Read Seurat objects that are filtered for high-quality cells.
+
+```{r}
+m4_seurat <-
+  readRDS(
+    "/dawson_genomics/Projects/Barcode/KF09_Clonal_competition/analysis/KF09_scRNA-seq/MLL_results/seurat_obj/MLL_M2_cc_regressed_normalised_singlets.rds"
+  )
+```
+
+Read re-processed barcode count data from single-cell data.
+
+```{r}
+m4_sc_bc_raw <-
+  bartools::readBartabCounts(
+    "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing_revision/m4_bartab_sc/counts/KF09_01_unmapped_reads.counts.tsv"
+  )
+```
+
+Read in barcode counts from spatial data. 
+
+```{r}
+m4_spatial_bc_raw_bin50 <-
+  read.csv(
+    "/dawson_genomics/Projects/BGI_spatial/plots_paper/input_data_revision/mouse4_bin50_bc_counts.tsv",
+    sep = "\t", row.names = 1
+  )
+# select bins on tissue section
+m4_spatial_bc_raw_bin50 <- m4_spatial_bc_raw_bin50 %>%
+  filter(isin_adata == "True") %>%
+  select(cell_id, barcode, count_binned) %>%
+  rename(cellid=cell_id, bc.umi.count = count_binned)
+dim(m4_spatial_bc_raw_bin50)
+
+m4_spatial_bc_raw_bin20 <-
+  read.csv(
+    "/dawson_genomics/Projects/BGI_spatial/plots_paper/input_data_revision/mouse4_bin20_bc_counts.tsv",
+    sep = "\t", row.names = 1
+  )
+m4_spatial_bc_raw_bin20 <- m4_spatial_bc_raw_bin20 %>%
+  filter(isin_adata == "True") %>%
+  select(cell_id, barcode, count_binned) %>%
+  rename(cellid=cell_id, bc.umi.count = count_binned)
+dim(m4_spatial_bc_raw_bin20)
+```
+
+Load bulk data. 
+2 PCR replicates. 
+
+```{r}
+samplesheet <- data.frame(
+  files = c(
+    "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing_revision/m4_bartab_bulk/counts/KF09-SPL-PCR2-MLL-MOUSE2-F2_S55_R1_001_rawcounts.txt",
+    "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing_revision/m4_bartab_bulk/counts/KF09-SPL-PCR1-MLL-MOUSE2-E2_S44_R1_001_rawcounts.txt"
+  ),
+  sample = c(
+    "KF09-SPL-PCR2-MLL-MOUSE2-F2",
+    "KF09-SPL-PCR1-MLL-MOUSE2-E2"
+  ),
+  group = c("mouse4", "mouse4")
+)
+```
+
+```{r}
+dge <-
+  edgeR::readDGE(
+    files = samplesheet,
+    group = samplesheet$group,
+    labels = samplesheet$sample,
+    header = T
+  )
+dge_filtered <-
+  thresholdCounts(
+    dge,
+    type = "absolute",
+    threshold = 5,
+    minSamples = 2,
+    plot = F
+  )
+dge_filtered_collapsed <-
+  collapseReplicates(dge_filtered,
+                     group = "group",
+                     method = "mean")
+```
+
+```{r}
+m4_bulk_bc_spl <- dge_filtered_collapsed$counts %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode") %>%
+  rename(count = mouse4)
+```
+
+Filter Spleen cells from single-cell data.
+
+```{r}
+unique(m4_seurat@meta.data$samplename)
+table(m4_seurat@meta.data$hash.ID)
+m4_seurat_spl <- subset(m4_seurat, hash.ID == "MLL-M2-SPL")
+# m4_seurat_bm <- subset(m4_seurat, hash.ID == "MLL-M2-BM")
+```
+
+Filter single-cell BARtab results for high-quality cells by intersecting with cells in Seurat object.
+
+```{r}
+m4_sc_bc_cells_spl <- m4_sc_bc_raw %>%
+  filter(cellid %in% colnames(m4_seurat_spl))
+```
+
+Barcode QC plots for single-cell data.
+
+```{r}
+bartools::plotBarcodesPerCell(m4_sc_bc_cells_spl)
+bartools::plotUmiPerBarcode(m4_sc_bc_cells_spl)
+```
+
+Select barcode with most UMI per cell.
+
+```{r}
+m4_sc_bc_spl <- m4_sc_bc_cells_spl %>%
+  group_by(cellid) %>%
+  slice_max(n=1, order_by = bc.umi.count) %>%
+  select(barcode, cellid)
+```
+
+QC plot for spatial data.  
+It is to be expected to have a small proportion of bins with multiple barcodes, more in bin50 than bin20. 
+
+```{r}
+bartools::plotBarcodesPerCell(m4_spatial_bc_raw_bin20)
+bartools::plotUmiPerBarcode(m4_spatial_bc_raw_bin20)
+
+bartools::plotBarcodesPerCell(m4_spatial_bc_raw_bin50)
+bartools::plotUmiPerBarcode(m4_spatial_bc_raw_bin50)
+```
+
+
+Create input data for stacked bar plot.
+
+
+```{r}
+get_bc <-
+  function(sc_bc_spl,
+           spatial_bc_raw,
+           bulk_bc_spl,
+           freq_cutoff = 0.01) {
+    sc_bc_spl <-
+      data.frame(table(sc_bc_spl$barcode))
+    colnames(sc_bc_spl) <- c("barcode", "count")
+    sc_bc_spl <- sc_bc_spl %>%
+      dplyr::mutate(freq = count / sum(count)) %>%
+      dplyr::arrange(desc(freq)) %>%
+      dplyr::mutate(dataset = "single-cell")
+    
+    bulk_bc_spl <- bulk_bc_spl %>%
+      dplyr::mutate(freq = count / sum(count)) %>%
+      dplyr::arrange(desc(freq)) %>%
+      dplyr::mutate(dataset = "bulk")
+    
+    spatial_bc <-
+      data.frame(table(spatial_bc_raw$barcode))
+    colnames(spatial_bc) <- c("barcode", "count")
+    spatial_bc <- spatial_bc %>%
+      dplyr::mutate(freq = count / sum(count)) %>%
+      dplyr::arrange(desc(freq)) %>%
+      dplyr::mutate(dataset = "spatial")
+    
+    bc <-
+      rbind(spatial_bc, sc_bc_spl, bulk_bc_spl) %>%
+      dplyr::arrange(desc(freq))
+    
+    bc_list <- bc %>%
+      filter(freq >= freq_cutoff) %>%
+      pull(barcode) %>%
+      unique()
+    
+    bc <- bc %>%
+      filter(barcode %in% bc_list)
+    
+    barcode_order <- bc %>%
+      arrange(freq) %>%
+      group_by(barcode) %>%
+      top_n(1, freq)
+    
+    bc$barcode <- factor(bc$barcode,
+                         levels = barcode_order$barcode)
+    
+    return(list(
+      sc_bc_spl = sc_bc_spl,
+      spatial_bc = spatial_bc,
+      bulk_bc_spl = bulk_bc_spl,
+      bc = bc
+    ))
+  }
+```
+
+
+```{r}
+m4_bc <-
+  get_bc(m4_sc_bc_spl,
+         m4_spatial_bc_raw_bin20,
+         m4_bulk_bc_spl, freq_cutoff = 0)
+```
+
+
+```{r}
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+```
+
+
+```{r fig.height=8, fig.width=8}
+n <- length(unique(m4_bc$bc$barcode))
+
+# set which barcodes to label
+bc_labels <- m4_bc$bc %>%
+  arrange(desc(freq)) %>%
+  pull(barcode) %>%
+  unique() %>%
+  head(20) %>% 
+  as.character()
+```
+
+Save input data for figure. 
+```{r}
+write_tsv(x = m4_bc$bc, file = "/dawson_genomics/Projects/BGI_spatial/plots_paper/input_data_revision/barcode_composition_sc_bulk_spatial.tsv")
+```
+
+```{r fig.height=8, fig.width=8}
+set.seed(639245)
+
+# map colors to barcodes
+cols_vector <- sample(col_vector, n, replace = T)
+label_values <- setNames(as.list(cols_vector), unique(m4_bc$bc$barcode))
+
+p <- m4_bc$bc %>%
+  ggplot(aes(fill = barcode, x = dataset, y = freq)) +
+  geom_bar(position = "stack", stat = "identity") +
+  scale_fill_manual(values = label_values, breaks = bc_labels) +
+  ggtitle("Mouse 4 (immunocompetent MLL-AF9)", subtitle = "KF09 MLL_M2") +
+  theme_bw() +
+  ylab("Proportion") +
+  theme(legend.text = element_text(size = 8),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("/dawson_genomics/Projects/BGI_spatial/plots_paper/stacked_bar_spatial_sc_bulk_spleen.pdf")
+p
+```
+
+
+

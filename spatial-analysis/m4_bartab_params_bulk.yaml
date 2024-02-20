@@ -1,0 +1,13 @@
+indir:              "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing/fastq_files_bulk/mouse4"
+ref:                "/dawson_genomics/Projects/splintr-libraries/SPLINTR_GFP/GFP_barcode_reference_library.fasta"
+mode:               "single-bulk"
+outdir:             "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing_revision/m4_bartab_bulk/"
+upconstant:         "TGACCATGTACGATTGACTA"
+up_coverage:        20
+constants:          "up"
+constantmismatches: 0.2
+barcode_length:     60
+min_readlength:     43
+max_cpus:           10
+max_memory:         "32.GB"
+max_time:           "10.h"

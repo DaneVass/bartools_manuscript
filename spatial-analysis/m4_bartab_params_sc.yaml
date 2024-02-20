@@ -1,0 +1,13 @@
+indir:              "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing/bam_input/"
+ref:                "/dawson_genomics/Projects/splintr-libraries/SPLINTR_GFP/GFP_barcode_reference_library.fasta"
+mode:               "single-cell"
+input_type:         "bam"
+outdir:             "/dawson_genomics/Projects/BGI_spatial/preprocessed_data/scRNAseq_comparison/splintr_reprocessing_revision/m4_bartab_sc/"
+upconstant:         "TGACCATGTACGATTGACTA"
+downconstant:       "TGCTAATGCGTACTGACTAG"
+constants:          "all"
+constantmismatches: 0.2
+barcode_length:     60
+max_cpus:           18
+max_memory:         "60.GB"
+max_time:           "10.h"
