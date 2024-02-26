@@ -29,10 +29,10 @@ BARtab was previously run on all 86 datasets and the counts are imported below.
 NB: sample labels for `IBET-gradual-TR1-TP5` and `ARAC-gradual-TR1-TP5` were switched in sequencing and are fixed in the counts table and samplesheet manually before importing into this analysis
 
 ```{r}
-sampletable <- read.csv("../../datasets/dose_escalation_02/dose_escalation_02_samplesheet.csv", header = T)
+sampletable <- read.csv("./dose_escalation_02_samplesheet.csv", header = T)
 
 # reformat names and order of counts table to match samplesheet
-counts <- read.delim("../../datasets/dose_escalation_02/dose_escalation_02_counts.tsv", header = T, row.names = 1)
+counts <- read.delim("./dose_escalation_02_counts.tsv", header = T, row.names = 1)
 counts <- counts[,order(colnames(counts))]
 colnames(counts) <- gsub("_S[0-9][0-9]_R[1]_001", "", colnames(counts))
 colnames(counts) <- gsub("_S[0-9]_R[1]_001", "", colnames(counts))
@@ -58,21 +58,9 @@ dose.filtered.counts <- dose.filtered$counts
 dim(dose.filtered.counts)
 ```
 
-## Examine BARtab output for dataset
-```{r, eval = FALSE}
-# this will not work if you have not preprocessed the raw data with BARtab
-bartab.dir <- "../../datasets/dose_escalation_02/preprocessed_data/"
-
-# filtered reads
-plotBARtabFilterQC(bartab.dir)
-
-# mapped reads
-plotBARtabMapQC(bartab.dir)
-```
-
 ## Examine total read counts across samples
 ```{r}
-plotReadCounts(dose.filtered$counts, group = dose.filtered$samples$Treatment)
+plotReadCounts(dose.filtered, group = "Treatment")
 ```
 
 Some samples have very low total counts due to very poor mappability and are unlikely to be informative. We will remove these from the analysis. 
@@ -93,22 +81,22 @@ dim(dose.filtered)
 
 ## Filter samples using absolute or relative abundance thresholds. 
 ```{r}
-thresholdCounts(dose.filtered, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Treatment") + coord_flip()
+thresholdCounts(dose.filtered, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Treatment") + coord_flip()
 ggsave(file.path(plot.dir,"thresholdBarcodes_Treatment.pdf"), width = 7, height = 10)
 
-thresholdCounts(dose.filtered, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Strategy") + coord_flip()
+thresholdCounts(dose.filtered, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Strategy") + coord_flip()
 ggsave(file.path(plot.dir,"thresholdBarcodes_Strategy.pdf"), width = 7, height = 10)
 
-thresholdCounts(dose.filtered, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Dose") + coord_flip()
+thresholdCounts(dose.filtered, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Dose") + coord_flip()
 ggsave(file.path(plot.dir,"thresholdBarcodes_Dose.pdf"), width = 7, height = 10)
 
-thresholdCounts(dose.filtered, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Timepoint") + coord_flip()
+thresholdCounts(dose.filtered, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Timepoint") + coord_flip()
 ggsave(file.path(plot.dir,"thresholdBarcodes_Timepoint.pdf"), width = 7, height = 10)
 ```
 
 ## filter samples with threshold 10 reads across at least 4 samples
 ```{r}
-dose.filtered <- thresholdCounts(dose.filtered, type = "absolute", threshold = 10, min.samps = 4, plot = F)
+dose.filtered <- thresholdCounts(dose.filtered, type = "absolute", threshold = 10, minSamples = 4, plot = F)
 dim(dose.filtered)
 ```
 
@@ -126,15 +114,15 @@ arac <- dose.filtered[,which(dose.filtered$samples$Treatment == "ARAC" | dose.fi
 
 ## plot raw counts per sample
 ```{r}
-plotReadCounts(dose.filtered$counts, group = dose.filtered$samples$Treatment) + 
+plotReadCounts(dose.filtered, group = "Treatment") + 
   geom_vline(xintercept = threshold)
 ggsave(file.path(plot.dir,"rawcounts_Treatment.pdf"), width = 7, height = 10)
 
-plotReadCounts(ibet$counts, group = ibet$samples$Treatment) + 
+plotReadCounts(ibet, group = "Treatment") + 
   geom_vline(xintercept = threshold)
 ggsave(file.path(plot.dir,"rawcounts_ibet_Treatment.pdf"), width = 7, height = 10)
 
-plotReadCounts(arac$counts, group = arac$samples$Treatment) + 
+plotReadCounts(arac, group = "Treatment") + 
   geom_vline(xintercept = threshold)
 ggsave(file.path(plot.dir,"rawcounts_arac_Treatment.pdf"), width = 7, height = 10)
 ```
@@ -142,21 +130,21 @@ ggsave(file.path(plot.dir,"rawcounts_arac_Treatment.pdf"), width = 7, height = 1
 ## plot total counts for detected barcodes
 ```{r}
 pdf("./plots/Total_counts.pdf")
-plotBarcodeCounts(dose.filtered$counts, log10 = F)
-plotBarcodeCounts(dose.filtered$counts, log10 = T)
+plotBarcodeCounts(dose.filtered, log10 = F)
+plotBarcodeCounts(dose.filtered, log10 = T)
 
 # ibet
-plotBarcodeCounts(ibet$counts, log10 = F)
-plotBarcodeCounts(ibet$counts, log10 = T)
+plotBarcodeCounts(ibet, log10 = F)
+plotBarcodeCounts(ibet, log10 = T)
 
 # arac
-plotBarcodeCounts(arac$counts, log10 = F)
-plotBarcodeCounts(arac$counts, log10 = T)
+plotBarcodeCounts(arac, log10 = F)
+plotBarcodeCounts(arac, log10 = T)
 dev.off()
 ```
 ## calculate correlation between PCR replicates
 ```{r}
-corrs <- calcReplicateCorr(dose.filtered, group = "group", corr.thresh = 0.9, return = "all")
+corrs <- calcReplicateCorr(dose.filtered, group = "group", corrThreshold = 0.9, return = "all")
 which(corrs < 0.8)
 
 ```
@@ -170,7 +158,7 @@ samps <- samps[-29]
 pdf("./plots/Replicate_corr.pdf", width = 6, height = 6)
 lapply(samps, function(x){
   df <- dose.filtered[,dose.filtered$samples$group %in% as.character(x)]
-  plotBarcodeRegression(df, samp1 = colnames(df)[[1]], samp2 = colnames(df)[[2]], rug = T, trans = "log10")
+  plotBarcodeRegression(df, sample1 = colnames(df)[[1]], sample2 = colnames(df)[[2]], rug = T, trans = "log10")
 })
 dev.off()
 ```
@@ -178,46 +166,46 @@ dev.off()
 ## example good replicate correlation
 ```{r}
 df <- dose.filtered[,dose.filtered$samples$group == "TP0"]
-plotBarcodeRegression(df, samp1 = colnames(df)[[1]], samp2 = colnames(df)[[2]], rug = T, trans = "log1p")
+plotBarcodeRegression(df, sample1 = colnames(df)[[1]], sample2 = colnames(df)[[2]], rug = T, trans = "log1p")
 ```
 
 ## example poor replicate correlation
 ```{r}
 df <- dose.filtered[,dose.filtered$samples$group == "ARAC_high_dose_TR1_TP1"]
-plotBarcodeRegression(df, samp1 = colnames(df)[[1]], samp2 = colnames(df)[[2]], rug = T, trans = "log1p")
+plotBarcodeRegression(df, sample1 = colnames(df)[[1]], sample2 = colnames(df)[[2]], rug = T, trans = "log1p")
 ```
 
 ## plot all pairwise correlations
 ```{r}
-plotBarcodeCorrelation(dose.filtered$counts, upper = F, clustered = T)
+plotBarcodeCorrelation(dose.filtered, upper = F, clustered = T)
 ggsave("./plots/pearson_corr_all_PCR_reps_clustered.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = F, clustered = F)
+plotBarcodeCorrelation(dose.filtered, upper = F, clustered = F)
 ggsave("./plots/pearson_corr_all_PCR_reps_not-clustered.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = T, clustered = T)
+plotBarcodeCorrelation(dose.filtered, upper = T, clustered = T)
 ggsave("./plots/pearson_corr_all_PCR_reps_clustered_upper.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = T, clustered = F)
+plotBarcodeCorrelation(dose.filtered, upper = T, clustered = F)
 ggsave("./plots/pearson_corr_all_PCR_reps_not-clustered_upper.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = F, clustered = T)
+plotBarcodeCorrelation(dose.filtered, upper = F, clustered = T)
 ggsave("./plots/spearman_corr_all_PCR_reps_clustered.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = F, clustered = F)
+plotBarcodeCorrelation(dose.filtered, upper = F, clustered = F)
 ggsave("./plots/spearman_corr_all_PCR_reps_not-clustered.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = T, clustered = T)
+plotBarcodeCorrelation(dose.filtered, upper = T, clustered = T)
 ggsave("./plots/spearman_corr_all_PCR_reps_clustered_upper.pdf", width = 10, height = 9)
 
-plotBarcodeCorrelation(dose.filtered$counts, upper = T, clustered = F)
+plotBarcodeCorrelation(dose.filtered, upper = T, clustered = F)
 ggsave("./plots/spearman_corr_all_PCR_reps_not-clustered_upper.pdf", width = 10, height = 9)
 ```
 
 ## Collapse PCR replicates in object
 ```{r}
 # take the average of PCR technical duplicates within a sample
-dose.filtered.collapsed <- collapseReplicates(dose.filtered, groupby = dose.filtered$samples$group, by = "mean")
+dose.filtered.collapsed <- collapseReplicates(dose.filtered, group = "group", method = "mean")
 ```
 
 The result is a clean barcode sequencing dataset ready for further investigation and visualisation.
@@ -254,7 +242,6 @@ rownames(dge) <- gsub("BFP_Barcode", "BC", rownames(dge))
 ## generate ibet and AraC specific datasets
 ```{r}
 ibet <- dge[,which(dge$samples$Treatment == "IBET" | dge$samples$Treatment == "DMSO"| dge$samples$Treatment == "TP0")]
-
 arac <- dge[,which(dge$samples$Treatment == "ARAC" | dge$samples$Treatment == "DMSO"| dge$samples$Treatment == "TP0")]
 ```
 
@@ -266,13 +253,13 @@ dge.TR2 <- dge[,which(dge$samples$Technical_Replicate == "TR2")]
 
 # confirm count thresholds
 ```{r}
-thresholdCounts(dge, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Treatment") + coord_flip()
+thresholdCounts(dge, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Treatment") + coord_flip()
 ggsave("./plots/thresholdBarcodes_collapsed_Treatment.pdf", width = 6, height = 8)
 
-thresholdCounts(dge, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Dose") + coord_flip()
+thresholdCounts(dge, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Dose") + coord_flip()
 ggsave("./plots/thresholdBarcodes_collapsed_Dose.pdf", width = 6, height = 8)
 
-thresholdCounts(dge, type = "absolute", threshold = 10, min.samps = 4, plot = T, group = "Timepoint") + coord_flip()
+thresholdCounts(dge, type = "absolute", threshold = 10, minSamples = 4, plot = T, group = "Timepoint") + coord_flip()
 ggsave("./plots/thresholdBarcodes_collapsed_Timepoint.pdf", width = 6, height = 8)
 ```
 
@@ -282,78 +269,74 @@ bartools includes a range of visualisation options for examining barcode-seq dat
 
 ## Bubble plot
 ```{r}
-plotBarcodeBubble(dge$counts, proportionCutoff = 10, labelBarcodes = T)
+plotBarcodeBubble(dge, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_all_collapsed.pdf")
 
-plotBarcodeBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T)
+plotBarcodeBubble(ibet, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_ibet_collapsed.pdf")
 
-plotBarcodeBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T)
+plotBarcodeBubble(arac, proportionCutoff = 10, labelBarcodes = T)
 ggsave("./plots/Bubbleplot_arac_collapsed.pdf")
 ```
 
-
 ## Ordered Bubble plots
 ```{r}
-plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
+plotOrderedBubble(dgeObject = dge, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed.pdf")
 
-plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Treatment", samples = dge$samples)
+plotOrderedBubble(dgeObject = dge, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Treatment")
 ggsave("./plots/orderedBubble_collapsed_Treatment.pdf")
 
-plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Strategy", samples = dge$samples)
+plotOrderedBubble(dgeObject = dge, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Strategy")
 ggsave("./plots/orderedBubble_collapsed_Strategy.pdf")
 
-plotOrderedBubble(counts = dge$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Timepoint", samples = dge$samples)
+plotOrderedBubble(dgeObject = dge, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01, group = "Timepoint")
 ggsave("./plots/orderedBubble_collapsed_Timepoint.pdf")
+
 ```
 
 ### IBET only
 ```{r}
-plotOrderedBubble(counts = ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
+plotOrderedBubble(dgeObject = ibet, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet.pdf")
 
-plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Treatment", filterCutoff = .01)
+plotOrderedBubble(dgeObject = ibet, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Treatment", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Treatment.pdf")
 
-plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Strategy", filterCutoff = .01)
+plotOrderedBubble(dgeObject = ibet, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Strategy", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Strategy.pdf")
 
-plotOrderedBubble(ibet$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = ibet$samples, group = "Timepoint", filterCutoff = .01)
+plotOrderedBubble(dgeObject = ibet, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Timepoint", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_ibet_Timepoint.pdf")
 ```
 
 ### AraC
 ```{r}
-plotOrderedBubble(counts = arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
+plotOrderedBubble(dgeObject = arac, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac.pdf")
 
-plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Treatment", filterCutoff = .01)
+plotOrderedBubble(dgeObject = arac, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Treatment", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Treatment.pdf")
 
-plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Strategy", filterCutoff = .01)
+plotOrderedBubble(dgeObject = arac, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Strategy", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Strategy.pdf")
 
-plotOrderedBubble(arac$counts, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", samples = arac$samples, group = "Timepoint", filterCutoff = .01)
+plotOrderedBubble(dgeObject = arac, proportionCutoff = 10, labelBarcodes = T, orderSample = "TP0", group = "Timepoint", filterCutoff = .01)
 ggsave("./plots/orderedBubble_collapsed_arac_Timepoint.pdf")
 
 ```
 
-## Barcode Plot
+## Barcode Histogram Plots
 ```{r}
-pdf("./plots/plot_barcode_histograms.pdf")
-plotBarcodeHistogram(dge$counts, sample = dge$samples$group[[40]], top = 50, name = "All samples")
-plotBarcodeHistogram(ibet$counts, sample = ibet$samples$group[[28]], top = 50, name = "IBET")
-plotBarcodeHistogram(arac$counts, sample = arac$samples$group[[21]], top = 50, name = "AraC")
-dev.off()
-
-plotBarcodeHistogram(dge$counts, sample = dge$samples$group[[40]], top = 50, name = "All samples")
-plotBarcodeHistogram(ibet$counts, sample = ibet$samples$group[[28]], top = 50, name = "IBET")
-plotBarcodeHistogram(arac$counts, sample = arac$samples$group[[21]], top = 50, name = "AraC")
-
+plotBarcodeHistogram(dge, topN = 10, alphaLowFreq = 0.5)
+ggsave("./plots/plot_barcode_histogram_all.pdf")
+plotBarcodeHistogram(ibet, topN = 10)
+ggsave("./plots/plot_barcode_histogram_ibet.pdf")
+plotBarcodeHistogram(arac, topN = 10)
+ggsave("./plots/plot_barcode_histogram_arac.pdf")
 ```
 
-## Timeseries Plot
+## Timeseries Plots
 ```{r}
 plotBarcodeTimeseries(dge$counts, seed = 101, top = 50)
 ggsave("./plots/timeseries_all_top50.pdf")
@@ -369,7 +352,7 @@ plotBarcodeTimeseries(dge.TR2$counts, seed = 101, top = 50)
 ggsave("./plots/timeseries_dge.TR2_top50.pdf")
 ```
 
-### merge Treatment & Strategy groups and facet manually
+### Merge Treatment & Strategy groups and plot timeseries
 ```{r}
 dge.TR1$samples$TreatStrat <- factor(paste(dge.TR1$samples$Treatment, dge.TR1$samples$Strategy, sep = "_"), levels = c("TP0_TP0","DMSO_DMSO","ARAC_gradual","ARAC_high_dose","IBET_gradual","IBET_high_dose" ))
 dge.TR1$samples$group <- factor(dge.TR1$samples$group, levels = rev(levels(dge.TR1$samples$group)))
@@ -382,50 +365,54 @@ plotBarcodeTimeseries(dge.TR1$counts[, dge.TR1$samples$TreatStrat == "IBET_gradu
 ## Principal Components Analysis
 A global level PCA analysis is a good way to get a high level understanding of the similarities and differences between samples. 
 ```{r}
-plotBarcodePCA(dge, intgroup = c("Treatment", "Timepoint")) + scale_color_manual(values = c(viridis::viridis(6)[1:5], rep("grey80", 5), viridis::inferno(6)[1:5], "red"))
+plotBarcodePCA(dge, groups = c("Treatment", "Timepoint")) + scale_color_manual(values = c(viridis::viridis(6)[1:5], rep("grey80", 5), viridis::inferno(6)[1:5], "red"))
 ggsave("./plots/PCA_all_treatment_timepoint.pdf", width = 5, height = 4)
-plotBarcodePCA(dge, intgroup = c("Treatment", "Dose"))
+plotBarcodePCA(dge, groups = c("Treatment", "Dose"))
 ggsave("./plots/PCA_all_treatment_dose.pdf", width = 5, height = 4)
 
-plotBarcodePCA(dge, intgroup = "Treatment")
+plotBarcodePCA(dge, groups = "Treatment")
 ggsave("./plots/PCA_all_treatment.pdf", width = 5, height = 4)
-plotBarcodePCA(ibet, intgroup = "Dose")
+plotBarcodePCA(ibet, groups = "Dose")
 ggsave("./plots/PCA_ibet_dose.pdf", width = 5, height = 4)
-plotBarcodePCA(arac, intgroup = "Dose")
+plotBarcodePCA(arac, groups = "Dose")
 ggsave("./plots/PCA_arac_dose.pdf", width = 5, height = 4)
+
+plotBarcodePCA(arac, groups = c("Technical_Replicate"))
+ggsave("./plots/PCA_arac_dose.pdf", width = 5, height = 4)
+
 ```
 
 ## Heatmaps
 ```{r}
-plotBarcodeHeatmap(dge$counts, N = 10, samples = dge$samples, group = c("Treatment", "Timepoint", "Strategy"))
-plotBarcodeHeatmap(ibet$counts, N = 10, samples = ibet$samples, group = c("Treatment", "Timepoint", "Strategy"))
-plotBarcodeHeatmap(arac$counts, N = 10, samples = arac$samples, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(dge, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(ibet, topN = 10, group = c("Treatment", "Timepoint", "Strategy", "Technical_Replicate"))
+plotBarcodeHeatmap(arac, topN = 10, group = c("Treatment", "Timepoint", "Strategy", "Technical_Replicate"))
 
-plotBarcodeHeatmap(dge.TR1$counts, N = 10, samples = dge.TR1$samples, group = c("Treatment", "Timepoint", "Strategy"))
-plotBarcodeHeatmap(dge.TR2$counts, N = 10, samples = dge.TR2$samples, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(dge.TR1, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(dge.TR2, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
 ```
 
 ### write heatmaps
 ```{r}
 pdf("./plots/heatmaps_top10.pdf", width = 5, height = 8)
-plotBarcodeHeatmap(dge$counts, N = 10, samples = dge$samples, group = c("Treatment", "Timepoint", "Strategy"))
-plotBarcodeHeatmap(ibet$counts, N = 10, samples = ibet$samples, group = c("Treatment", "Timepoint", "Strategy"))
-plotBarcodeHeatmap(arac$counts, N = 10, samples = arac$samples, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(dge, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(ibet, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
+plotBarcodeHeatmap(arac, topN = 10, group = c("Treatment", "Timepoint", "Strategy"))
 dev.off()
 ```
 
 ## Diversity metrics
 ```{r}
-diversity <- calcDivIndexes(dge$counts, group = dge$samples$Treatment)
+diversity <- calcDivIndexes(dge, group = "Treatment")
 diversity
 write.csv(diversity, file = "./diversity_calculations.csv")
 ```
 
 ### plot diversity metrics
 ```{r}
-plotDivIndexes(div = diversity, metric = "shannon", type = "point", group = dge$samples$Treatment)
-plotDivIndexes(div = diversity, metric = "shannon", type = "point", group = dge$samples$Treatment) + facet_wrap(~diversity$group)
-plotDivIndexes(div = diversity, metric = "shannon", group = dge$samples$Treatment)
+plotDivIndexes(dge, div = diversity, metric = "shannon", type = "point", group = "Treatment")
+ggsave("./plots/shannon_point.pdf")
+plotDivIndexes(dge, div = diversity, metric = "shannon", group = "Treatment")
 ggsave("./plots/shannon_histogram.pdf")
 ```
 
@@ -433,8 +420,9 @@ ggsave("./plots/shannon_histogram.pdf")
 ```{r}
 TP5.samps <- diversity[grep("high_dose", diversity$name, perl = T, invert = T),]
 TP5.samps <- TP5.samps[grep("TP5|TP0", TP5.samps$name, perl = T, invert = F),]
+TP5 <- dge[,TP5.samps$name]
 
-plotDivIndexes(div = TP5.samps, metric = "shannon", group = TP5.samps$group)
+plotDivIndexes(TP5, div = TP5.samps, metric = "shannon", group = "group")
 ggsave("./plots/shannon_histogram_TP5.pdf")
 ```
 
@@ -443,51 +431,55 @@ ggsave("./plots/shannon_histogram_TP5.pdf")
 gradual.samps <- diversity[grep("high_dose", diversity$name, perl = T, invert = T),]
 TR1.samps <- gradual.samps[grep("TR1|TP0", gradual.samps$name, perl = T, invert = F),]
 TR2.samps <- gradual.samps[grep("TR2|TP0", gradual.samps$name, perl = T, invert = F),]
-plotDivIndexes(div = TR1.samps, metric = "shannon", group = TR1.samps$group)
+
+TR1 <- dge[,TR1.samps$name]
+plotDivIndexes(TR1, div = TR1.samps, metric = "shannon", group = "group")
 ggsave("./plots/shannon_histogram_TR1.pdf")
-plotDivIndexes(div = TR2.samps, metric = "shannon", group = TR2.samps$group)
+
+TR2 <- dge[,TR2.samps$name]
+plotDivIndexes(TR2, div = TR2.samps, metric = "shannon", group = "group")
 ggsave("./plots/shannon_histogram_TR2.pdf")
 ```
 
 ### Plot distance between samples
 ```{r}
-plotBarcodeDistance(dge$counts, method = "euclidean", clustered = F)
+plotBarcodeDistance(dge, method = "euclidean", clustered = F)
 ggsave("./plots/euclidean_dist_all.pdf")
-plotBarcodeDistance(ibet$counts, method = "euclidean", clustered = F)
+plotBarcodeDistance(ibet, method = "euclidean", clustered = F)
 ggsave("./plots/euclidean_dist_ibet.pdf")
-plotBarcodeDistance(arac$counts, method = "euclidean", clustered = F)
+plotBarcodeDistance(arac, method = "euclidean", clustered = F)
 ggsave("./plots/euclidean_dist_arac.pdf")
 
 # replicate level 
-plotBarcodeDistance(dge.TR1$counts, method = "euclidean", clustered = F)
+plotBarcodeDistance(dge.TR1, method = "euclidean", clustered = F)
 ggsave("./plots/euclidean_dist_TR1.pdf")
-plotBarcodeDistance(dge.TR2$counts, method = "euclidean", clustered = F)
+plotBarcodeDistance(dge.TR2, method = "euclidean", clustered = F)
 ggsave("./plots/euclidean_dist_TR2.pdf")
-
-
-
 ```
 
 ## Plot correlation between samples
 ```{r}
-plotBarcodeCorrelation(cpm(dge), method = "pearson", clustered = T)
+plotBarcodeCorrelation(dge, method = "pearson", clustered = T)
 ggsave("./plots/pearson_collapsed_all.pdf")
-plotBarcodeCorrelation(cpm(ibet$counts), method = "pearson", clustered = T)
+plotBarcodeCorrelation(ibet, method = "pearson", clustered = T)
 ggsave("./plots/pearson_collapsed_ibet.pdf")
-plotBarcodeCorrelation(cpm(arac$counts), method = "pearson", clustered = T)
+plotBarcodeCorrelation(arac, method = "pearson", clustered = F)
 ggsave("./plots/pearson_collapsed_arac.pdf")
+plotBarcodeCorrelation(arac, method = "pearson", clustered = F)
+ggsave("./plots/pearson_collapsed_arac_not_clustered.pdf")
 
-plotBarcodeCorrelation(cpm(dge), method = "spearman", clustered = T)
+
+plotBarcodeCorrelation(dge, method = "spearman", clustered = T)
 ggsave("./plots/spearman_collapsed_all.pdf")
-plotBarcodeCorrelation(cpm(ibet$counts), method = "spearman", clustered = T)
+plotBarcodeCorrelation(ibet, method = "spearman", clustered = T)
 ggsave("./plots/spearman_collapsed_ibet.pdf")
-plotBarcodeCorrelation(cpm(arac$counts), method = "spearman", clustered = T)
+plotBarcodeCorrelation(arac, method = "spearman", clustered = T)
 ggsave("./plots/spearman_collapsed_arac.pdf")
 
 # replicate level
-plotBarcodeCorrelation(cpm(dge.TR1), method = "spearman", clustered = T)
+plotBarcodeCorrelation(dge.TR1, method = "spearman", clustered = T)
 ggsave("./plots/spearman_collapsed_TR1.pdf")
-plotBarcodeCorrelation(cpm(dge.TR2), method = "spearman", clustered = T)
+plotBarcodeCorrelation(dge.TR2, method = "spearman", clustered = T)
 ggsave("./plots/spearman_collapsed_TR2.pdf")
 
 ```
@@ -509,13 +501,30 @@ plotDetectedBarcodes(arac, group = "Treatment", percentile = 0.95) + coord_flip(
 ggsave("./plots/detected_barcodes_arac_95th.pdf", width = 7, height = 6)
 ```
 
+## calculate correlation between replicate samples
+```{r}
+dge$samples$rep_corr <- paste(dge$samples$Treatment, dge$samples$Strategy, dge$samples$Dose, dge$samples$Timepoint, sep = "_")
+dat <- data.frame(calcReplicateCorr(dge, "rep_corr"))
+dat$group <- str_split(rownames(dat), pattern = "_", simplify = T)[,1]
+dat$strategy <- str_split(rownames(dat), pattern = "_", simplify = T)[,2]
+colnames(dat)[1] <- "corr"
+ggplot(dat, aes(y = corr, x = group, fill = group)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1) + theme_classic() +
+  ggtitle("correlation between biological replicate samples from same dose and timepoint")
+ggsave("./plots/replicate_sample_corr.pdf", width = 4, height = 4)
+
+plotBarcodeCorrelation(dge, upper = F)
+```
+
+
 ## compare dominant barcodes across treatments
 ### calculate dominant barcodes above 1pct thresh
 ```{r}
 library(VennDetail)
 
 # ibet dominant barcodes per treatment strategy
-ibet.bc <- getDominantBarcodes(dge[,dge$samples$Treatment == "IBET"], pct.thresh = 1)
+ibet.bc <- getDominantBarcodes(ibet, threshold = .01)
 ibet.bc.gradual <- unique(unlist(ibet.bc[1:10]))
 ibet.bc.high <- unique(unlist(ibet.bc[11:18]))
 
@@ -523,7 +532,7 @@ ibet.res <- venndetail(list(ibet.gradual = ibet.bc.gradual, ibet.high = ibet.bc.
 plot(ibet.res)
 
 # arac dominant barcodes per treatment strategy
-arac.bc <- getDominantBarcodes(dge[,dge$samples$Treatment == "ARAC"], pct.thresh = 1)
+arac.bc <- getDominantBarcodes(arac, threshold = .01)
 arac.bc.gradual <- unique(unlist(arac.bc[1:8]))
 arac.bc.high <- unique(unlist(arac.bc[9:12]))
 
@@ -564,12 +573,6 @@ ggsave("./plots/barcode_boxplots_dmso.pdf", width = 5, height = 3)
 
 ```
 
-## Comparing abundance
-We can statistically test for barcodes / tags that are over / underrepresented in a group of samples relative to another using the internal edgeR framework. barista contains a convenience wrapper for this functionality
-```{r}
-ibet.abundance <- compareAbundance(ibet, meta = "Strategy", condition1 = "gradual", "high_dose", logFC.cutoff = 3, pval.cutoff = 0.01)
-ibet.abundance
-```
 ```{r}
 sessionInfo()
 ```
