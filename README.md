@@ -1,5 +1,7 @@
 # bartools/BARtab manuscript code
 
+[![DOI](https://zenodo.org/badge/713176761.svg)](https://zenodo.org/doi/10.5281/zenodo.10896642)
+
 Code to reproduce analyses in bartools/BARtab manuscript.
 
 Comparison of [BARtab](https://github.com/DaneVass/BARtab/) with pycashier and timemachine in `tools-comparison/`.  
